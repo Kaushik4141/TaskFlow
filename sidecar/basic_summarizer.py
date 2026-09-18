@@ -32,10 +32,15 @@ class BasicSummarizer:
         all_text = " ".join(chunk["text"] for chunk in chunks if len(chunk["text"]) > 30)
 
         if self.lexrank_available and len(all_text.split()) > 100:
+            method = "basic (LexRank extractive)"
             for point in self._run_lexrank(all_text, 3):
                 point = point.strip()
                 if len(point) > 20 and point not in key_points and not point.startswith("http") and len(key_points) < 6:
                     key_points.append(point)
+        else:
+            method = "basic (structured heuristic signals)"
+
+        print(f"SUMMARIZE: BasicSummarizer using method '{method}'", flush=True)
 
         markdown = self._build_markdown(
             title,
@@ -54,6 +59,7 @@ class BasicSummarizer:
             "resources": resources[:10],
             "generated_locally": True,
             "mode": "basic",
+            "method": method,
         }
 
     def _has_tokenizer_data(self) -> bool:

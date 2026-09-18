@@ -89,9 +89,15 @@ pub async fn run_rollup(
         .flatten()
         .map(|previous| chain_context(&previous));
 
-    let ai_mode_label;
+    let (ai_mode_label, method_label);
     let generated: SummarizeResponse = if events.len() < MIN_EVENTS_FOR_AI {
         ai_mode_label = "template".to_string();
+        method_label = format!("template (small window < {MIN_EVENTS_FOR_AI} events)");
+        println!(
+            "[taskflow:rollup] Summarizing window '{}' ({} events) using method: {method_label}",
+            title_with_window,
+            events.len()
+        );
         commands::fallback_summary(
             &task,
             &events,
@@ -103,6 +109,20 @@ pub async fn run_rollup(
         )
     } else if sidecar_ready {
         ai_mode_label = summary_settings.mode.clone();
+        method_label = if summary_settings.mode == "basic" {
+            "basic (sidecar extractive)".to_string()
+        } else if summary_settings.mode == "local_ai" {
+            format!("local_ai (Ollama: {})", summary_settings.ollama_model)
+        } else if summary_settings.mode == "cloud_ai" {
+            format!("cloud_ai ({})", summary_settings.cloud_model)
+        } else {
+            summary_settings.mode.clone()
+        };
+        println!(
+            "[taskflow:rollup] Summarizing window '{}' ({} events) using method: {method_label}",
+            title_with_window,
+            events.len()
+        );
         if summary_settings.mode == "basic" {
             let relevant_events = events.iter().map(commands::scored_from_event).collect();
             state
@@ -116,7 +136,7 @@ pub async fn run_rollup(
                 )
                 .await
                 .unwrap_or_else(|err| {
-                    eprintln!("[taskflow:rollup] basic summarization failed: {err}");
+                    eprintln!("[taskflow:rollup] basic summarization failed: {err}; falling back to template method");
                     commands::fallback_summary(
                         &task,
                         &events,
@@ -142,7 +162,7 @@ pub async fn run_rollup(
                         .filter(|event| event.included)
                         .collect(),
                     Err(err) => {
-                        eprintln!("[taskflow:rollup] AI event filtering failed: {err}");
+                        eprintln!("[taskflow:rollup] AI event filtering failed: {err}; using unfiltered events");
                         events.iter().map(commands::scored_from_event).collect()
                     }
                 }
@@ -158,7 +178,7 @@ pub async fn run_rollup(
                 )
                 .await
                 .unwrap_or_else(|err| {
-                    eprintln!("[taskflow:rollup] AI summarization failed: {err}");
+                    eprintln!("[taskflow:rollup] AI summarization failed: {err}; falling back to template method");
                     commands::fallback_summary(
                         &task,
                         &events,
@@ -168,12 +188,24 @@ pub async fn run_rollup(
         }
     } else {
         ai_mode_label = "template".to_string();
+        method_label = "template fallback (sidecar offline)".to_string();
+        println!(
+            "[taskflow:rollup] Summarizing window '{}' ({} events) using method: {method_label}",
+            title_with_window,
+            events.len()
+        );
         commands::fallback_summary(
             &task,
             &events,
             Some(commands::FALLBACK_REASON_NO_AI.to_string()),
         )
     };
+
+    let actual_method = generated.method.as_deref().unwrap_or(&method_label);
+    println!(
+        "[taskflow:rollup] Rollup summarization finished for '{}' (method: {actual_method})",
+        title_with_window
+    );
 
     // The LLM may append machine-readable ```hub:<Folder>/<slug> synthesis
     // blocks; parse them out for the wiki upsert and keep the human-facing

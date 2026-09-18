@@ -238,6 +238,26 @@ pub async fn generate_documentation(
         None
     };
 
+    let method_label = if sidecar_ready {
+        if summary_settings.mode == "basic" {
+            "basic (sidecar extractive)".to_string()
+        } else if summary_settings.mode == "local_ai" {
+            format!("local_ai (Ollama: {})", summary_settings.ollama_model)
+        } else if summary_settings.mode == "cloud_ai" {
+            format!("cloud_ai ({})", summary_settings.cloud_model)
+        } else {
+            summary_settings.mode.clone()
+        }
+    } else {
+        "template fallback (sidecar offline)".to_string()
+    };
+
+    println!(
+        "[taskflow:ai] Summarizing task '{}' ({} events) using method: {method_label}",
+        task.title,
+        events.len()
+    );
+
     let mut generated = if sidecar_ready {
         if summary_settings.mode == "basic" {
             let relevant_events = events.iter().map(scored_from_event).collect();
@@ -252,7 +272,7 @@ pub async fn generate_documentation(
                 )
                 .await
                 .unwrap_or_else(|err| {
-                    eprintln!("[taskflow:ai] basic summarization failed: {err}");
+                    eprintln!("[taskflow:ai] basic summarization failed: {err}; falling back to template method");
                     fallback_summary(&task, &events, Some(FALLBACK_REASON_NO_AI.to_string()))
                 })
         } else {
@@ -282,12 +302,12 @@ pub async fn generate_documentation(
                         )
                         .await
                         .unwrap_or_else(|err| {
-                            eprintln!("[taskflow:ai] AI summarization failed: {err}");
+                            eprintln!("[taskflow:ai] AI summarization failed: {err}; falling back to template method");
                             fallback_summary(&task, &events, Some(FALLBACK_REASON_NO_AI.to_string()))
                         })
                 }
                 Err(err) => {
-                    eprintln!("[taskflow:ai] AI event filtering failed: {err}");
+                    eprintln!("[taskflow:ai] AI event filtering failed: {err}; falling back to template method");
                     fallback_summary(&task, &events, Some(FALLBACK_REASON_NO_AI.to_string()))
                 }
             }
@@ -295,6 +315,12 @@ pub async fn generate_documentation(
     } else {
         fallback_summary(&task, &events, Some(FALLBACK_REASON_NO_AI.to_string()))
     };
+
+    let actual_method = generated.method.as_deref().unwrap_or(&method_label);
+    println!(
+        "[taskflow:ai] Summarization finished for task '{}' (method: {actual_method})",
+        task.title
+    );
 
     // The LLM appends machine-readable per-hub synthesis blocks to its markdown
     // (fenced as ```hub:<Folder>/<slug>). For memory tasks we parse them out for
@@ -396,6 +422,10 @@ pub async fn test_summary_settings(
     settings: SummarySettings,
     _state: State<'_, AppState>,
 ) -> Result<TestResult, String> {
+    println!(
+        "[taskflow:ai] Testing summarization settings using method: {}",
+        settings.mode
+    );
     let result = match settings.mode.as_str() {
         "local_ai" => test_ollama_settings(&settings).await,
         "cloud_ai" => test_cloud_settings(&settings).await,
@@ -1354,6 +1384,7 @@ pub(crate) fn fallback_summary(
         resources,
         duration_seconds: None,
         generated_locally: true,
+        method: Some("template fallback".to_string()),
     }
 }
 

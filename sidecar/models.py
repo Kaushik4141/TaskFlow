@@ -76,3 +76,4 @@ class SummarizeResponse(BaseModel):
     resources: list[str]
     duration_seconds: int | None = None
     generated_locally: bool = Field(default=True)
+    method: Optional[str] = None

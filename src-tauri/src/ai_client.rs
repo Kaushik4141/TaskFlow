@@ -84,6 +84,8 @@ pub struct SummarizeResponse {
     pub resources: Vec<String>,
     pub duration_seconds: Option<i64>,
     pub generated_locally: bool,
+    #[serde(default)]
+    pub method: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
