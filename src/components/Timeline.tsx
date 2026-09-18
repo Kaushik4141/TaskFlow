@@ -13,6 +13,7 @@ import ReactMarkdown from 'react-markdown'
 import type { Rollup } from '../types'
 import { useTaskStore } from '../stores/taskStore'
 import { useStaggerContainer, useStaggerItem } from '../lib/motion'
+import AppLogo from './AppLogo'
 
 interface TimelineProps {
   taskId: string
@@ -25,7 +26,7 @@ interface TimelineProps {
  * date-grouping accordion headers, and instant timeline search.
  */
 export default function Timeline({ taskId, onBack }: { taskId: string; onBack?: () => void }) {
-  const { rollups, selectedTask, activeTask } = useTaskStore()
+  const { rollups, selectedTask, activeTask, selectedRollupId, setSelectedRollupId } = useTaskStore()
   const [searchQuery, setSearchQuery] = useState('')
   const [workstreamFilter, setWorkstreamFilter] = useState<string | null>(null)
   const [collapsedDates, setCollapsedDates] = useState<Record<string, boolean>>({})
@@ -221,7 +222,11 @@ export default function Timeline({ taskId, onBack }: { taskId: string; onBack?: 
                     <AnimatePresence initial={false}>
                       {dateRollups.map((rollup) => (
                         <motion.div key={rollup.id} variants={itemV} layout>
-                          <PiecesRollupCard rollup={rollup} />
+                          <PiecesRollupCard
+                            rollup={rollup}
+                            isSelected={rollup.id === selectedRollupId}
+                            onSelect={() => setSelectedRollupId(rollup.id === selectedRollupId ? null : rollup.id)}
+                          />
                         </motion.div>
                       ))}
                     </AnimatePresence>
@@ -242,9 +247,18 @@ export default function Timeline({ taskId, onBack }: { taskId: string; onBack?: 
  * - Workstream Tag Pill
  * - 2-line Content Snippet Preview
  * - Bottom Row: Relative Time + App/Website Logo Row
- * - Expandable to reveal full Markdown summary & key points
+ * - Clicking the card selects it to show full details in the main workspace
+ * - Expandable to reveal inline Markdown preview
  */
-function PiecesRollupCard({ rollup }: { rollup: Rollup }) {
+function PiecesRollupCard({
+  rollup,
+  isSelected,
+  onSelect,
+}: {
+  rollup: Rollup
+  isSelected?: boolean
+  onSelect?: () => void
+}) {
   const [expanded, setExpanded] = useState(false)
   const keyPoints = useMemo(() => parseJsonArray(rollup.keyPoints), [rollup.keyPoints])
   const apps = useMemo(() => parseJsonArray(rollup.apps), [rollup.apps])
@@ -269,21 +283,62 @@ function PiecesRollupCard({ rollup }: { rollup: Rollup }) {
   }, [keyPoints, rollup.summaryMd])
 
   return (
-    <div className="group rounded-2xl border border-white/[0.06] bg-white/[0.015] p-3.5 transition-all hover:border-white/12 hover:bg-white/[0.035]">
-      <div className="cursor-pointer" onClick={() => setExpanded(!expanded)}>
-        {/* Top row: Pieces-style Document Icon + Title */}
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect?.()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect?.()
+        }
+      }}
+      className={`group relative rounded-2xl border p-3.5 transition-all text-left w-full outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 cursor-pointer ${
+        isSelected
+          ? 'border-brand-500/80 bg-brand-500/[0.09] ring-1 ring-brand-500/40 shadow-lg shadow-brand-500/10'
+          : 'border-white/[0.06] bg-white/[0.015] hover:border-white/15 hover:bg-white/[0.035]'
+      }`}
+    >
+      <div>
+        {/* Top row: Pieces-style Document Icon + Title + Active Pill */}
         <div className="flex items-start gap-2.5">
-          <CardDocIcon />
-          <h3 className="line-clamp-2 min-w-0 flex-1 text-xs font-semibold leading-snug text-white/90 group-hover:text-white">
+          <CardDocIcon active={isSelected} />
+          <h3
+            className={`line-clamp-2 min-w-0 flex-1 text-xs font-semibold leading-snug transition-colors ${
+              isSelected ? 'text-white font-bold' : 'text-white/90 group-hover:text-white'
+            }`}
+          >
             {rollup.title}
           </h3>
+          {isSelected && (
+            <span className="shrink-0 rounded-full bg-brand-400 px-1.5 py-0.2 text-[9px] font-bold text-black uppercase tracking-wider">
+              Viewing
+            </span>
+          )}
         </div>
 
-        {/* Workstream Tag Pill */}
-        <div className="mt-1.5 pl-6">
-          <span className="inline-block rounded-md bg-white/[0.05] border border-white/[0.06] px-2 py-0.5 text-[10px] font-medium lowercase text-white/60">
+        {/* Workstream Tag Pill & Inline preview expander button */}
+        <div className="mt-1.5 pl-6 flex items-center justify-between">
+          <span
+            className={`inline-block rounded-md border px-2 py-0.5 text-[10px] font-medium lowercase ${
+              isSelected
+                ? 'border-brand-500/40 bg-brand-500/20 text-brand-200'
+                : 'bg-white/[0.05] border-white/[0.06] text-white/60'
+            }`}
+          >
             {workstream}
           </span>
+          <button
+            type="button"
+            title={expanded ? 'Collapse preview' : 'Expand preview'}
+            onClick={(e) => {
+              e.stopPropagation()
+              setExpanded(!expanded)
+            }}
+            className="rounded p-0.5 text-white/40 hover:bg-white/[0.08] hover:text-white transition-colors"
+          >
+            <ChevronDownIcon className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          </button>
         </div>
 
         {/* 2-line snippet preview */}
@@ -297,14 +352,14 @@ function PiecesRollupCard({ rollup }: { rollup: Rollup }) {
           {apps.length > 0 && (
             <div className="flex shrink-0 items-center gap-1">
               {apps.slice(0, 4).map((app, idx) => (
-                <AppLogo key={`${app}-${idx}`} appName={app} />
+                <AppLogo key={`${app}-${idx}`} appName={app} size="sm" />
               ))}
             </div>
           )}
         </div>
       </div>
 
-      {/* Expandable full details & Markdown */}
+      {/* Expandable inline Markdown preview */}
       <AnimatePresence initial={false}>
         {expanded && (
           <motion.div
@@ -313,6 +368,7 @@ function PiecesRollupCard({ rollup }: { rollup: Rollup }) {
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
             className="mt-3 border-t border-white/[0.06] pt-3 text-xs overflow-hidden"
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
           >
             <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
               {rollup.triggerKind && (
@@ -355,131 +411,28 @@ function PiecesRollupCard({ rollup }: { rollup: Rollup }) {
 /**
  * Pieces OS Document / Activity icon next to card title
  */
-function CardDocIcon() {
+function CardDocIcon({ active }: { active?: boolean }) {
   return (
-    <div className="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-white/[0.06] text-white/60 mt-0.5">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="h-2.5 w-2.5">
+    <div
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded mt-0.5 transition-colors ${
+        active ? 'bg-brand-500 text-black' : 'bg-white/[0.06] text-white/60'
+      }`}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-2.5 w-2.5"
+      >
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
         <polyline points="14 2 14 8 20 8" />
         <line x1="9" y1="13" x2="15" y2="13" />
         <line x1="9" y1="17" x2="13" y2="17" />
       </svg>
     </div>
-  )
-}
-
-/**
- * Pieces OS-style app/website logo icons
- */
-function AppLogo({ appName }: { appName: string }) {
-  const clean = appName.toLowerCase().replace(/\.exe$/, '').trim()
-
-  // Google Chrome
-  if (clean.includes('chrome')) {
-    return (
-      <span title="Google Chrome" className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white shadow-sm overflow-hidden">
-        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5">
-          <circle cx="12" cy="12" r="11" fill="#EA4335" />
-          <path d="M12 1a11 11 0 0 1 9.5 5.5L12 12V1z" fill="#EA4335" />
-          <path d="M21.5 6.5A11 11 0 0 1 12 23l4.8-8.2 4.7-8.3z" fill="#FBBC05" />
-          <path d="M12 23A11 11 0 0 1 2.5 6.5L12 12v11z" fill="#34A853" />
-          <circle cx="12" cy="12" r="5" fill="#ffffff" />
-          <circle cx="12" cy="12" r="4" fill="#4285F4" />
-        </svg>
-      </span>
-    )
-  }
-
-  // VS Code / Cursor / IDE
-  if (clean.includes('code') || clean.includes('cursor')) {
-    return (
-      <span title={appName} className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#007ACC] text-white shadow-sm">
-        <svg viewBox="0 0 24 24" fill="currentColor" className="h-2.5 w-2.5">
-          <path d="M23.15 2.587L18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261A1 1 0 0 0 .32 8.653l3.65 3.344-3.65 3.345a1 1 0 0 0-.007 1.392l1.322 1.202a1 1 0 0 0 1.276.057l4.12-3.128 9.46 8.63a1.492 1.492 0 0 0 1.704.29l4.94-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zM18 13.48l-5.63-4.14 5.63-4.14v8.28z" />
-        </svg>
-      </span>
-    )
-  }
-
-  // Slack
-  if (clean.includes('slack')) {
-    return (
-      <span title="Slack" className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#4A154B] text-white shadow-sm">
-        <svg viewBox="0 0 24 24" fill="currentColor" className="h-2.5 w-2.5 text-[#E01E5A]">
-          <path d="M6 15a2 2 0 0 1-2 2 2 2 0 0 1-2-2 2 2 0 0 1 2-2h2v2zm1 0a2 2 0 0 1 2-2 2 2 0 0 1 2 2v5a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-5zm2-7a2 2 0 0 1-2-2 2 2 0 0 1 2-2 2 2 0 0 1 2 2v2H9zm0 1a2 2 0 0 1 2 2 2 2 0 0 1-2 2H4a2 2 0 0 1-2-2 2 2 0 0 1 2-2h5zm7 2a2 2 0 0 1 2-2 2 2 0 0 1 2 2 2 2 0 0 1-2 2h-2v-2zm-1 0a2 2 0 0 1-2 2 2 2 0 0 1-2-2V6a2 2 0 0 1 2-2 2 2 0 0 1 2 2v5zm-2 7a2 2 0 0 1 2 2 2 2 0 0 1-2 2 2 2 0 0 1-2-2v-2h2zm0-1a2 2 0 0 1-2-2 2 2 0 0 1 2-2h5a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-5z" />
-        </svg>
-      </span>
-    )
-  }
-
-  // GitHub
-  if (clean.includes('github')) {
-    return (
-      <span title="GitHub" className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#24292e] text-white shadow-sm">
-        <svg viewBox="0 0 24 24" fill="currentColor" className="h-2.5 w-2.5">
-          <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
-        </svg>
-      </span>
-    )
-  }
-
-  // Terminal / Console
-  if (
-    clean.includes('terminal') ||
-    clean.includes('powershell') ||
-    clean.includes('cmd') ||
-    clean.includes('bash') ||
-    clean.includes('zsh') ||
-    clean.includes('wezterm') ||
-    clean.includes('alacritty')
-  ) {
-    return (
-      <span title={appName} className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-black ring-1 ring-white/20 text-emerald-400 font-mono text-[9px] font-bold shadow-sm">
-        &gt;
-      </span>
-    )
-  }
-
-  // Figma
-  if (clean.includes('figma')) {
-    return (
-      <span title="Figma" className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#1e1e1e] shadow-sm">
-        <svg viewBox="0 0 24 24" className="h-2.5 w-2.5">
-          <circle cx="16" cy="18" r="4" fill="#0ACF83" />
-          <circle cx="8" cy="18" r="4" fill="#1ABCFE" />
-          <circle cx="8" cy="12" r="4" fill="#A259FF" />
-          <circle cx="8" cy="6" r="4" fill="#F24E1E" />
-          <circle cx="16" cy="6" r="4" fill="#FF7262" />
-        </svg>
-      </span>
-    )
-  }
-
-  // Notion / Obsidian
-  if (clean.includes('notion') || clean.includes('obsidian')) {
-    return (
-      <span title={appName} className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white text-black font-serif text-[9px] font-black shadow-sm">
-        N
-      </span>
-    )
-  }
-
-  // Generic colored initial badge fallback
-  const colors = [
-    'bg-brand-500/30 text-brand-200 ring-brand-500/40',
-    'bg-sky-500/30 text-sky-200 ring-sky-500/40',
-    'bg-amber-500/30 text-amber-200 ring-amber-500/40',
-    'bg-emerald-500/30 text-emerald-200 ring-emerald-500/40',
-    'bg-purple-500/30 text-purple-200 ring-purple-500/40',
-  ]
-  const charCode = clean.charCodeAt(0) || 0
-  const colorClass = colors[charCode % colors.length]
-  const initial = (clean[0] || 'A').toUpperCase()
-
-  return (
-    <span title={appName} className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full ring-1 text-[9px] font-bold shadow-sm ${colorClass}`}>
-      {initial}
-    </span>
   )
 }
 
