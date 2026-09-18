@@ -1,7 +1,7 @@
 import { Dispatch, FormEvent, ReactNode, SetStateAction, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { invoke } from '@tauri-apps/api/core'
-import { BrainIcon, CircleCheckIcon, BookOpenTextIcon, FolderOpenIcon, GitBranchIcon, KeyRoundIcon, LinkIcon, CodeXmlIcon, ShieldCheckIcon, Trash2Icon, XIcon, ZapIcon, SparklesIcon, EyeIcon, TerminalIcon, SettingsIcon } from '@animateicons/react/lucide'
+import { BrainIcon, CircleCheckIcon, BookOpenTextIcon, FolderOpenIcon, GitBranchIcon, KeyRoundIcon, LinkIcon, CodeXmlIcon, ShieldCheckIcon, Trash2Icon, XIcon, ZapIcon, SparklesIcon, EyeIcon, TerminalIcon, SettingsIcon, SunIcon } from '@animateicons/react/lucide'
 import SummarySettings from './SummarySettings'
 import EventFeed from './EventFeed'
 import { CandidateCard } from './CandidateCard'
@@ -210,50 +210,49 @@ export default function Settings() {
     { id: 'capture' as const, icon: <EyeIcon className="h-4 w-4" />, label: 'Capture' },
     { id: 'integrations' as const, icon: <LinkIcon className="h-4 w-4" />, label: 'Integrations' },
     { id: 'summary' as const, icon: <SparklesIcon className="h-4 w-4" />, label: 'Summary' },
-    { id: 'appearance' as const, icon: <EyeIcon className="h-4 w-4" />, label: 'Theme' },
-    { id: 'developer' as const, icon: <SettingsIcon className="h-4 w-4" />, label: 'Developer' },
+    { id: 'appearance' as const, icon: <SunIcon className="h-4 w-4" />, label: 'Theme' },
   ]
 
   return (
     <div className="flex h-full flex-col overflow-hidden" style={{ containerType: 'inline-size' }}>
       {/* Compact header + tab bar */}
       <div className="shrink-0 border-b border-white/[0.06] px-4 pb-3 pt-5">
-        <div className="mb-3 flex items-center justify-between">
-          <h1 className="text-[13px] font-semibold uppercase tracking-[0.12em] text-white/50">Settings</h1>
-          <button
-            type="button"
-            onClick={() => setActiveSection(activeSection === 'developer' ? 'capture' : 'developer')}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${
-              activeSection === 'developer'
-                ? 'bg-brand-500 text-white shadow-glow-sm'
-                : 'border border-brand-500/40 bg-brand-500/15 text-brand-200 hover:bg-brand-500/25 hover:text-white shadow-sm'
-            }`}
-          >
-            <TerminalIcon className="h-3.5 w-3.5 text-brand-300" />
-            <span>{activeSection === 'developer' ? '← Back to Settings' : 'Developer Options'}</span>
-          </button>
-        </div>
+        <h1 className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-white/50">Settings</h1>
         <div className="flex gap-1 rounded-lg bg-white/[0.04] p-0.5">
           {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              className={`relative z-10 flex flex-1 items-center justify-center gap-1 rounded-md px-1 py-1.5 text-[11px] font-semibold transition-colors ${
-                activeSection === tab.id ? 'text-white' : 'text-white/40 hover:text-white/70'
-              }`}
-              onClick={() => setActiveSection(tab.id)}
-              type="button"
-              title={tab.label}
-            >
-              {activeSection === tab.id && (
-                <motion.div
-                  layoutId="settings-tab"
-                  transition={selectionSpring}
-                  className="absolute inset-0 -z-10 rounded-md bg-white/[0.08]"
-                />
-              )}
-              {tab.icon}
-              <span className="truncate">{tab.label}</span>
-            </button>
+            <div key={tab.id} className="group relative flex flex-1">
+              <button
+                className={`relative z-10 flex w-full items-center justify-center py-2 rounded-md transition-colors ${
+                  activeSection === tab.id ? 'text-white' : 'text-white/40 hover:text-white/70'
+                }`}
+                onClick={() => setActiveSection(tab.id)}
+                type="button"
+                aria-label={tab.label}
+                title={tab.label}
+              >
+                {activeSection === tab.id && (
+                  <motion.div
+                    layoutId="settings-tab"
+                    transition={selectionSpring}
+                    className="absolute inset-0 -z-10 rounded-md bg-white/[0.08]"
+                  />
+                )}
+                {activeSection === tab.id && (
+                  <motion.span
+                    layoutId="settings-tab-underline"
+                    transition={selectionSpring}
+                    className="absolute -bottom-0.5 left-2.5 right-2.5 h-0.5 rounded-full bg-brand-400 shadow-glow-sm"
+                  />
+                )}
+                {tab.icon}
+              </button>
+              {/* Tooltip on hover */}
+              <div className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 z-50 pt-1 opacity-0 scale-95 transition-all duration-150 group-hover:opacity-100 group-hover:scale-100">
+                <div className="whitespace-nowrap rounded-md border border-white/10 bg-noir-900/95 px-2 py-0.5 text-[10px] font-medium text-white shadow-elevated backdrop-blur-md">
+                  {tab.label}
+                </div>
+              </div>
+            </div>
           ))}
         </div>
       </div>
