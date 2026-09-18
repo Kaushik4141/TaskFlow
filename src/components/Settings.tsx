@@ -1,7 +1,7 @@
 import { Dispatch, FormEvent, ReactNode, SetStateAction, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { invoke } from '@tauri-apps/api/core'
-import { BrainIcon, CircleCheckIcon, BookOpenTextIcon, FolderOpenIcon, GitBranchIcon, KeyRoundIcon, LinkIcon, CodeXmlIcon, ShieldCheckIcon, Trash2Icon, XIcon, ZapIcon, SparklesIcon, EyeIcon, TerminalIcon } from '@animateicons/react/lucide'
+import { BrainIcon, CircleCheckIcon, BookOpenTextIcon, FolderOpenIcon, GitBranchIcon, KeyRoundIcon, LinkIcon, CodeXmlIcon, ShieldCheckIcon, Trash2Icon, XIcon, ZapIcon, SparklesIcon, EyeIcon, TerminalIcon, SettingsIcon } from '@animateicons/react/lucide'
 import SummarySettings from './SummarySettings'
 import EventFeed from './EventFeed'
 import { CandidateCard } from './CandidateCard'
@@ -211,7 +211,7 @@ export default function Settings() {
     { id: 'integrations' as const, icon: <LinkIcon className="h-4 w-4" />, label: 'Integrations' },
     { id: 'summary' as const, icon: <SparklesIcon className="h-4 w-4" />, label: 'Summary' },
     { id: 'appearance' as const, icon: <EyeIcon className="h-4 w-4" />, label: 'Theme' },
-    { id: 'developer' as const, icon: <TerminalIcon className="h-4 w-4" />, label: 'Dev' },
+    { id: 'developer' as const, icon: <SettingsIcon className="h-4 w-4" />, label: 'Developer' },
   ]
 
   return (
@@ -228,7 +228,7 @@ export default function Settings() {
               }`}
               onClick={() => setActiveSection(tab.id)}
               type="button"
-              title={tab.label}
+              title={tab.id === 'developer' ? 'Developer Options' : tab.label}
             >
               {activeSection === tab.id && (
                 <motion.div
@@ -336,11 +336,16 @@ export default function Settings() {
 function DeveloperSection() {
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-sm font-semibold tracking-tight text-white">Developer Options</h2>
-        <p className="mt-1 text-xs text-white/50">
-          Inspect the live raw event stream (last 50 events) captured from active windows, clipboard, and URLs.
-        </p>
+      <div className="flex items-center gap-2.5">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-300 ring-1 ring-brand-500/20">
+          <SettingsIcon className="h-4 w-4" />
+        </div>
+        <div>
+          <h2 className="text-sm font-semibold tracking-tight text-white">Developer Options</h2>
+          <p className="text-[11px] text-white/50">
+            Live raw event stream (last 50 events) and window telemetry
+          </p>
+        </div>
       </div>
       <EventFeed />
     </div>
