@@ -14,6 +14,7 @@ import type { Rollup } from '../types'
 import { useTaskStore } from '../stores/taskStore'
 import { useStaggerContainer, useStaggerItem } from '../lib/motion'
 import AppLogo from './AppLogo'
+import TaskFlowLogo from './TaskFlowLogo'
 
 interface TimelineProps {
   taskId: string
@@ -112,7 +113,10 @@ export default function Timeline({ taskId, onBack }: { taskId: string; onBack?: 
               <span>Tasks</span>
             </button>
           ) : (
-            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-white/40">TaskFlow</p>
+            <div className="flex items-center gap-1.5">
+              <TaskFlowLogo size="xs" showWordmark={false} />
+              <p className="font-display text-[11px] font-medium uppercase tracking-[0.18em] text-white/50">TaskFlow</p>
+            </div>
           )}
 
           {isActive && (

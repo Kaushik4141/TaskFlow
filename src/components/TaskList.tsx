@@ -4,6 +4,7 @@ import { differenceInSeconds, format, formatDistanceStrict, isToday, isYesterday
 import { CircleCheckIcon, LoaderCircleIcon, LayoutListIcon, PlusIcon, ArrowDownUpIcon, SearchIcon, XIcon } from '@animateicons/react/lucide'
 import { useTaskStore } from '../stores/taskStore'
 import { SkeletonCard } from './Skeleton'
+import TaskFlowLogo from './TaskFlowLogo'
 import { HoverCard, modalVariants, motion, selectionSpring, useStaggerContainer, useStaggerItem } from '../lib/motion'
 import type { Integration, Task, Ticket } from '../types'
 
@@ -100,7 +101,10 @@ export default function TaskList({ onSelectTimeline }: { onSelectTimeline?: () =
       <div className="border-b border-white/[0.06] p-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-white/40">TaskFlow</p>
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <TaskFlowLogo size="xs" showWordmark={false} />
+              <p className="font-display text-[11px] font-medium uppercase tracking-[0.18em] text-white/50">TaskFlow</p>
+            </div>
             <h1 className="text-lg font-semibold tracking-tight text-white">Tasks</h1>
           </div>
           <motion.button
