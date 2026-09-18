@@ -9,7 +9,7 @@ import type { Integration, Task, Ticket } from '../types'
 
 const sourceOptions: Task['source'][] = ['manual', 'jira', 'github', 'linear']
 
-export default function TaskList() {
+export default function TaskList({ onSelectTimeline }: { onSelectTimeline?: () => void } = {}) {
   const {
     tasks,
     selectedTask,
@@ -140,7 +140,10 @@ export default function TaskList() {
                   task={task}
                   selected={selectedTask?.id === task.id}
                   eventCount={selectedTask?.id === task.id ? events.length : 0}
-                  onClick={() => void selectTask(task)}
+                  onClick={() => {
+                    void selectTask(task)
+                    onSelectTimeline?.()
+                  }}
                 />
               ))}
             </TaskGroup>

@@ -1,15 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { differenceInSeconds, formatDistanceStrict, parseISO } from 'date-fns'
-import { BookOpenTextIcon, LoaderCircleIcon, PauseIcon, PlayIcon } from '@animateicons/react/lucide'
+import { BookOpenTextIcon, LoaderCircleIcon, PauseIcon, PlayIcon, SparklesIcon } from '@animateicons/react/lucide'
 import { useTaskStore } from '../stores/taskStore'
-import type { CaptureStats, Task } from '../types'
+import type { Task } from '../types'
 import Documentation from './Documentation'
-import EventFeed from './EventFeed'
-import Timeline from './Timeline'
+import { SkeletonDocument } from './Skeleton'
 import { useStaggerContainer, useStaggerItem } from '../lib/motion'
-
-type TaskView = 'timeline' | 'feed' | 'docs'
 
 export default function ActiveTask({ task }: { task: Task }) {
   const {
@@ -19,12 +16,11 @@ export default function ActiveTask({ task }: { task: Task }) {
     sidecarReady,
     documentation,
     isGenerating,
-    captureStats,
+    generateDocumentation,
     fetchCaptureStats,
   } = useTaskStore()
   const [note, setNote] = useState('')
   const [now, setNow] = useState(Date.now())
-  const [view, setView] = useState<TaskView>('timeline')
 
   useEffect(() => {
     if (task.status !== 'active') {
@@ -53,13 +49,9 @@ export default function ActiveTask({ task }: { task: Task }) {
 
   const handleTaskToggle = async () => {
     if (task.status === 'active') {
-      // Stop = flush: the backend rolls up the final window and the timeline
-      // updates via the store — no more one-shot full-task generate.
       await stopTask(task.id)
-      setView('timeline')
     } else {
       await startTask(task.id)
-      setView('timeline')
     }
   }
 
@@ -102,18 +94,6 @@ export default function ActiveTask({ task }: { task: Task }) {
               {sidecarReady ? 'AI ready' : 'AI loading...'}
             </div>
             <div className="flex flex-wrap justify-end gap-2">
-              {documentation && task.status !== 'active' && (
-                <motion.button
-                  type="button"
-                  whileHover={{ y: -1 }}
-                  whileTap={{ scale: 0.97 }}
-                  className="btn-ghost"
-                  onClick={() => setView((current) => (current === 'docs' ? 'timeline' : 'docs'))}
-                >
-                  <BookOpenTextIcon className="h-[18px] w-[18px]" />
-                  {view === 'docs' ? 'Hide Documentation' : 'View Documentation'}
-                </motion.button>
-              )}
               <motion.button
                 type="button"
                 whileHover={{ y: -1 }}
@@ -159,72 +139,39 @@ export default function ActiveTask({ task }: { task: Task }) {
             <Metric label="Created" value={new Date(task.createdAt).toLocaleString()} />
           </motion.div>
         </motion.div>
-
       </header>
 
-      <div className="border-b border-white/[0.06] px-6 pt-3">
-        <div className="flex gap-1">
-          {(
-            [
-              { id: 'timeline' as TaskView, label: 'Timeline' },
-              { id: 'feed' as TaskView, label: 'Live Feed' },
-              ...(documentation ? [{ id: 'docs' as TaskView, label: 'Documentation' }] : []),
-            ]
-          ).map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setView(tab.id)}
-              className={`relative rounded-t-lg px-3 py-2 text-xs font-semibold transition-colors ${
-                view === tab.id ? 'text-white' : 'text-white/40 hover:text-white/70'
-              }`}
-            >
-              {tab.label}
-              {view === tab.id && (
-                <motion.div layoutId="active-task-tab" className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-brand-500" />
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
+      {/* Primary Workspace View: Documentation */}
       <div className="relative min-h-0 flex-1 overflow-y-auto">
-        <AnimatePresence mode="wait">
-          {view === 'docs' && documentation ? (
-            <motion.div
-              key="docs"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.22 }}
-              className="h-full"
+        {isGenerating ? (
+          <SkeletonDocument />
+        ) : documentation ? (
+          <Documentation documentation={documentation} />
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center p-8 text-center">
+            <div className="relative mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500/20 to-brand-600/10 ring-1 ring-brand-500/20">
+              <BookOpenTextIcon className="h-6 w-6 text-brand-300" />
+              <div className="absolute inset-0 -z-10 rounded-2xl bg-brand-500/30 blur-xl" />
+            </div>
+            <h2 className="text-balance text-xl font-semibold tracking-tight text-white">
+              No documentation generated yet
+            </h2>
+            <p className="mt-3 max-w-md text-sm leading-6 text-white/50">
+              TaskFlow continuously captures activity and creates roll-ups in your sidebar timeline. Generate
+              comprehensive Markdown documentation from your captured work at any time.
+            </p>
+            <motion.button
+              type="button"
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.98 }}
+              className="btn-primary mt-6"
+              onClick={() => void generateDocumentation(task.id)}
             >
-              <Documentation documentation={documentation} />
-            </motion.div>
-          ) : view === 'feed' ? (
-            <motion.div
-              key="feed"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.22 }}
-              className="h-full"
-            >
-              <EventFeed taskId={task.id} />
-            </motion.div>
-          ) : (
-            <motion.div
-              key="timeline"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.22 }}
-              className="h-full"
-            >
-              <Timeline taskId={task.id} />
-            </motion.div>
-          )}
-        </AnimatePresence>
+              <SparklesIcon className="h-4 w-4" />
+              Generate Documentation
+            </motion.button>
+          </div>
+        )}
       </div>
 
       <form className="border-t border-white/[0.06] p-4" onSubmit={handleNote}>
@@ -251,8 +198,6 @@ export default function ActiveTask({ task }: { task: Task }) {
     </div>
   )
 }
-
-
 
 function Metric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (

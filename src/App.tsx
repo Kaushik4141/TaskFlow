@@ -10,6 +10,7 @@ import Search from './components/Search'
 import Settings from './components/Settings'
 import StatsPanel from './components/StatsPanel'
 import TaskList from './components/TaskList'
+import Timeline from './components/Timeline'
 import ToastContainer from './components/Toast'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { motion } from './lib/motion'
@@ -62,7 +63,19 @@ export default function App() {
   } = useTaskStore()
 
   const [helpOpen, setHelpOpen] = useState(false)
+  const [sidebarView, setSidebarView] = useState<'tasks' | 'timeline'>('tasks')
   const viewSwap = useViewSwap()
+
+  const prevTaskIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (selectedTask && selectedTask.id !== prevTaskIdRef.current) {
+      setSidebarView('timeline')
+      prevTaskIdRef.current = selectedTask.id
+    } else if (!selectedTask) {
+      setSidebarView('tasks')
+      prevTaskIdRef.current = null
+    }
+  }, [selectedTask])
 
   useEffect(() => {
     startTaskStoreListeners()
@@ -171,13 +184,23 @@ export default function App() {
             </div>
             <div className="relative z-10 min-h-0 flex-1">
               <AnimatePresence mode="wait">
-                <motion.div key={settingsOpen ? 'settings' : 'tasks'} className="h-full" {...viewSwap}>
-                  {settingsOpen ? <Settings /> : <TaskList />}
+                <motion.div
+                  key={settingsOpen ? 'settings' : sidebarView === 'timeline' && selectedTask ? 'timeline' : 'tasks'}
+                  className="h-full"
+                  {...viewSwap}
+                >
+                  {settingsOpen ? (
+                    <Settings />
+                  ) : sidebarView === 'timeline' && selectedTask ? (
+                    <Timeline taskId={selectedTask.id} onBack={() => setSidebarView('tasks')} />
+                  ) : (
+                    <TaskList onSelectTimeline={() => setSidebarView('timeline')} />
+                  )}
                 </motion.div>
               </AnimatePresence>
             </div>
             <AnimatePresence>
-              {!settingsOpen && (
+              {!settingsOpen && sidebarView === 'tasks' && (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
