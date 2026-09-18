@@ -1,25 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
-
-@font-face {
-  font-family: 'Inter';
-  src: url('/fonts/Inter_18pt-Regular.ttf') format('truetype');
-  font-weight: 400;
-  font-style: normal;
-}
-
-@font-face {
-  font-family: 'Inter';
-  src: url('/fonts/Inter_18pt-Medium.ttf') format('truetype');
-  font-weight: 500;
-  font-style: normal;
-}
-
-@font-face {
-  font-family: 'Studio Feixen Sans';
-  src: url('/fonts/StudioFeixenSans-Medium.otf') format('opentype');
-  font-weight: 500;
-  font-style: normal;
-}
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Manrope:wght@500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -29,7 +8,8 @@
   color-scheme: dark;
   /* Base body = neutral near-black */
   background: #09090b;
-  font-family: Inter, 'Aptos', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Manrope', system-ui, sans-serif;
+  font-weight: 500;
   font-feature-settings: 'cv11', 'ss01';
   font-variant-ligatures: common-ligatures;
   /* Resolve Tailwind's custom color utilities via CSS vars */
@@ -252,9 +232,9 @@ select {
 .markdown-body h3,
 .markdown-body h4 {
   color: var(--ink);
-  font-family: 'Studio Feixen Sans', sans-serif;
+  font-family: 'Manrope', sans-serif;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   margin-top: 1.5em;
   margin-bottom: 0.5em;
 }
@@ -327,13 +307,7 @@ select {
   }
 }
 
-/* Settings tab labels: hide when the sidebar container is narrow */
+/* Settings tab labels: always visible */
 .tab-label {
-  display: none;
-}
-
-@container (min-width: 280px) {
-  .tab-label {
-    display: inline;
-  }
+  display: inline;
 }

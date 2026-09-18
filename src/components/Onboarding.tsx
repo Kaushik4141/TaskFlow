@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { invoke } from '@tauri-apps/api/core'
 import { ActivityIcon, SquareArrowOutUpRightIcon, CircleCheckIcon, EyeIcon, BookOpenTextIcon, LinkIcon, LockIcon, PlayIcon, ShieldCheckIcon, SparklesIcon } from '@animateicons/react/lucide'
 import AmbientBackground from './AmbientBackground'
+import TaskFlowLogo from './TaskFlowLogo'
 import { selectionSpring } from '../lib/motion'
 
 interface OnboardingProps {
@@ -68,12 +69,12 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           {step === 0 && (
             <Slide key="welcome" direction={direction}>
               <div className="text-center">
-                <div className="relative mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-brand-600 shadow-glow">
-                  <ActivityIcon className="h-10 w-10 text-white" />
+                <div className="relative mx-auto mb-6 inline-flex">
+                  <TaskFlowLogo size="xl" showWordmark={false} />
                   <div className="absolute -inset-2 -z-10 rounded-3xl bg-brand-500/30 blur-2xl" />
                 </div>
-                <h1 className="text-balance text-4xl font-bold tracking-tight text-white">
-                  Welcome to <span className="bg-gradient-to-r from-brand-400 to-brand-200 bg-clip-text text-transparent">TaskFlow</span>
+                <h1 className="text-balance text-4xl font-semibold tracking-tight text-white">
+                  Welcome to <span className="font-display text-ink">TaskFlow</span>
                 </h1>
                 <p className="mx-auto mt-4 max-w-sm text-base leading-7 text-white/55">
                   Documents how you work — automatically, 100% locally, open source.
@@ -95,7 +96,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           {/* Step 1: How It Works */}
           {step === 1 && (
             <Slide key="how" direction={direction}>
-              <h2 className="mb-8 text-center text-2xl font-bold tracking-tight text-white">How It Works</h2>
+              <h2 className="mb-8 text-center text-2xl font-semibold tracking-tight text-white">How It Works</h2>
               <div className="space-y-3">
                 {[
                   { icon: PlayIcon, title: 'Start a task', desc: 'Create or import a task from Jira, GitHub, or Linear.' },
@@ -134,7 +135,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   <ShieldCheckIcon className="h-7 w-7 text-brand-300" />
                 </div>
               </div>
-              <h2 className="mb-3 text-center text-2xl font-bold tracking-tight text-white">Privacy First</h2>
+              <h2 className="mb-3 text-center text-2xl font-semibold tracking-tight text-white">Privacy First</h2>
               <p className="mx-auto mb-6 max-w-sm text-center text-sm leading-6 text-white/55">
                 Your data never leaves your device unless you explicitly choose to use Cloud AI with your own key.
               </p>
@@ -173,7 +174,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   <LinkIcon className="h-7 w-7 text-brand-300" />
                 </div>
               </div>
-              <h2 className="mb-3 text-center text-2xl font-bold tracking-tight text-white">Connect Integrations</h2>
+              <h2 className="mb-3 text-center text-2xl font-semibold tracking-tight text-white">Connect Integrations</h2>
               <p className="mx-auto mb-6 max-w-sm text-center text-sm leading-6 text-white/55">
                 Connect Jira, GitHub, or Linear to import tasks automatically. You can also skip this and add tasks manually.
               </p>
