@@ -22,6 +22,24 @@ class ContextBuilder:
         r"^[^a-zA-Z]*$",
     ]
 
+    SECRET_PATTERNS = [
+        re.compile(r"sk-[a-zA-Z0-9_\-]{20,}"),
+        re.compile(r"(?:ghp|gho|ghu|ghs|ghr)_[a-zA-Z0-9]{36}"),
+        re.compile(r"github_pat_[a-zA-Z0-9_]{82}"),
+        re.compile(r"AKIA[0-9A-Z]{16}"),
+        re.compile(r"AIza[0-9A-Za-z\-_]{35}"),
+        re.compile(r"xox[baprs]-[0-9a-zA-Z]{10,48}"),
+        re.compile(r"(?:sk|rk)_(?:live|test)_[0-9a-zA-Z]{24,}"),
+        re.compile(r"eyJ[A-Za-z0-9\-_=]+\.eyJ[A-Za-z0-9\-_=]+\.?[A-Za-z0-9\-_.+/=]*"),
+    ]
+    URI_CREDENTIALS_PATTERN = re.compile(r"([a-zA-Z][a-zA-Z0-9+.\-]*://)([^:\s/@]+):([^/\s]+)@")
+    ASSIGNMENT_PATTERN = re.compile(
+        r"(?i)(api[_\-]?key|access[_\-]?token|secret[_\-]?key|password|passwd|auth[_\-]?token|client[_\-]?secret)\s*([:=])\s*['\x22]?([^\s'\x22#;]+)['\x22]?"
+    )
+    PRIVATE_KEY_PATTERN = re.compile(
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"
+    )
+
     def build(self, events: list, task_title: str, task_description: str = None) -> dict:
         context = {
             "task_title": task_title,
@@ -48,7 +66,7 @@ class ContextBuilder:
                 seen_apps.append(app)
 
             if getattr(event, "event_type", None) == "clipboard" and event.content:
-                content = event.content.strip()
+                content = self._scrub_secrets(event.content.strip())
                 if len(content) > 10 and not content.startswith("http") and content not in context["clipboard_items"]:
                     context["clipboard_items"].append(content[:300])
 
@@ -93,8 +111,19 @@ class ContextBuilder:
         context["signals"] = self._extract_signals(context["clean_chunks"])
         return context
 
+    def _scrub_secrets(self, text: str) -> str:
+        if not text:
+            return ""
+        text = self.PRIVATE_KEY_PATTERN.sub("[REDACTED_PRIVATE_KEY]", text)
+        text = self.URI_CREDENTIALS_PATTERN.sub(r"\g<1>[REDACTED]:[REDACTED]@", text)
+        text = self.ASSIGNMENT_PATTERN.sub(r"\g<1>\g<2>[REDACTED]", text)
+        for pattern in self.SECRET_PATTERNS:
+            text = pattern.sub("[REDACTED]", text)
+        return text
+
     def _clean_content(self, raw: str) -> str:
-        clean = re.sub(r"[\ufffc\ufffe\uffff]", "", raw)
+        clean = self._scrub_secrets(raw)
+        clean = re.sub(r"[\ufffc\ufffe\uffff]", "", clean)
         clean = re.sub(r"[\ue000-\uf8ff]", "", clean)
         clean = re.sub(r"[\ufe00-\ufe0f]", "", clean)
         lines = []
