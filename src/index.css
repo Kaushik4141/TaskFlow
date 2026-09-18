@@ -1,0 +1,339 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/Inter_18pt-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/Inter_18pt-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Studio Feixen Sans';
+  src: url('/fonts/StudioFeixenSans-Medium.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  /* Base body = neutral near-black */
+  background: #09090b;
+  font-family: Inter, 'Aptos', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  font-feature-settings: 'cv11', 'ss01';
+  font-variant-ligatures: common-ligatures;
+  /* Resolve Tailwind's custom color utilities via CSS vars */
+  --ink: #F4ECF0;
+  --ink-2: rgba(244, 236, 240, 0.66);
+  --ink-3: rgba(244, 236, 240, 0.42);
+  --ink-4: rgba(244, 236, 240, 0.26);
+  --hair: rgba(244, 236, 240, 0.08);
+
+  /* Brand green ramp (Default) */
+  --brand-600: 31 77 47;
+  --brand-500: 44 107 66;
+  --brand-400: 58 140 86;
+  --brand-300: 72 174 107;
+  --brand-200: 117 201 145;
+  --brand-100: 168 224 188;
+}
+
+:root.theme-blue {
+  --brand-600: 30 58 138;
+  --brand-500: 37 99 235;
+  --brand-400: 59 130 246;
+  --brand-300: 96 165 250;
+  --brand-200: 147 197 253;
+  --brand-100: 191 219 254;
+}
+
+:root.theme-purple {
+  --brand-600: 88 28 135;
+  --brand-500: 147 51 234;
+  --brand-400: 168 85 247;
+  --brand-300: 192 132 252;
+  --brand-200: 216 180 254;
+  --brand-100: 233 213 255;
+}
+
+:root.theme-orange {
+  --brand-600: 154 52 18;
+  --brand-500: 234 88 12;
+  --brand-400: 249 115 22;
+  --brand-300: 253 186 116;
+  --brand-200: 253 186 116;
+  --brand-100: 254 215 170;
+}
+
+:root.theme-red {
+  --brand-600: 220 38 38;
+  --brand-500: 239 68 68;
+  --brand-400: 248 113 113;
+  --brand-300: 252 165 165;
+  --brand-200: 254 202 202;
+  --brand-100: 254 226 226;
+}
+
+:root.theme-teal {
+  --brand-600: 13 148 136;
+  --brand-500: 20 184 166;
+  --brand-400: 45 212 191;
+  --brand-300: 94 234 212;
+  --brand-200: 153 246 228;
+  --brand-100: 204 251 241;
+}
+
+:root.theme-cyan {
+  --brand-600: 8 145 178;
+  --brand-500: 6 182 212;
+  --brand-400: 34 211 238;
+  --brand-300: 103 232 249;
+  --brand-200: 165 243 252;
+  --brand-100: 207 250 254;
+}
+
+:root.theme-black {
+  --brand-600: 82 82 91;
+  --brand-500: 113 113 122;
+  --brand-400: 161 161 170;
+  --brand-300: 212 212 216;
+  --brand-200: 228 228 231;
+  --brand-100: 244 244 245;
+}
+
+html {
+  font-size: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: #09090b;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+/* ---------------------------------------------------------------- */
+/* Scrollbar — minimal, warm-tinted, brand on hover                 */
+/* ---------------------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(244, 236, 240, 0.1);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 59, 71, 0.4);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(244, 236, 240, 0.1) transparent;
+}
+
+/* ---------------------------------------------------------------- */
+/* Selection                                                        */
+/* ---------------------------------------------------------------- */
+::selection {
+  background: rgba(255, 59, 71, 0.3);
+  color: #fff;
+}
+
+/* ---------------------------------------------------------------- */
+/* Legacy keyframes retained for components that still reference them */
+/* ---------------------------------------------------------------- */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.animate-shimmer {
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+@keyframes toast-in {
+  0% { opacity: 0; transform: translateY(12px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-toast-in {
+  animation: toast-in 0.25s ease-out;
+}
+
+/* ---------------------------------------------------------------- */
+/* Reusable component layers                                        */
+/* ---------------------------------------------------------------- */
+@layer components {
+  /* Glassy elevated surface — used for panels, cards, modals */
+  .surface {
+    @apply border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm;
+  }
+
+  /* Primary CTA — outlined pill */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full
+           border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-white/90
+           transition-all duration-150
+           hover:border-white/20 hover:bg-white/[0.08] hover:text-white
+           active:scale-[0.98]
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Secondary — transparent ghost pill */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full
+           border border-transparent bg-transparent px-4 py-2.5 text-sm
+           font-semibold text-white/70 transition-all duration-150
+           hover:border-white/10 hover:bg-white/[0.05] hover:text-white
+           active:scale-[0.98]
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Destructive */
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-full
+           border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm
+           font-semibold text-red-400 transition-all duration-150
+           hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/50
+           active:scale-[0.98];
+  }
+
+  /* Tabular form control */
+  .input {
+    @apply w-full rounded-xl border border-white/10 bg-black/40 px-3.5 py-2.5
+           text-sm text-white outline-none transition-all duration-150
+           placeholder:text-white/30
+           focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/20;
+  }
+  .textarea {
+    @apply w-full resize-none rounded-xl border border-white/10 bg-black/40
+           px-3.5 py-2.5 text-sm text-white outline-none transition-all duration-150
+           placeholder:text-white/30
+           focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/20;
+  }
+  .select {
+    @apply w-full cursor-pointer rounded-xl border border-white/10 bg-black/40
+           px-3.5 py-2.5 text-sm text-white outline-none transition-all duration-150
+           focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/20;
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* Lightweight markdown rendering (no typography plugin needed)    */
+/* ---------------------------------------------------------------- */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  color: var(--ink);
+  font-family: 'Studio Feixen Sans', sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+.markdown-body h1 { font-size: 1.5rem; }
+.markdown-body h2 { font-size: 1.25rem; }
+.markdown-body h3 { font-size: 1.1rem; }
+.markdown-body p {
+  line-height: 1.7;
+  color: rgba(244, 236, 240, 0.7);
+  margin-bottom: 0.75em;
+}
+.markdown-body a {
+  color: #FF5566;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.markdown-body a:hover { color: #FF7A8C; }
+.markdown-body code {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  color: #FF7A8C;
+}
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+.markdown-body pre {
+  background: rgba(0, 0, 0, 0.4);
+  padding: 1rem;
+  border-radius: 0.75rem;
+  overflow-x: auto;
+  margin-bottom: 1em;
+}
+.markdown-body ul, .markdown-body ol {
+  padding-left: 1.25em;
+  margin-bottom: 0.75em;
+  color: rgba(244, 236, 240, 0.7);
+  line-height: 1.7;
+}
+.markdown-body li { margin-bottom: 0.25em; }
+.markdown-body blockquote {
+  border-left: 3px solid rgba(255, 59, 71, 0.4);
+  padding-left: 1rem;
+  margin-left: 0;
+  color: rgba(244, 236, 240, 0.55);
+  font-style: italic;
+  margin-bottom: 0.75em;
+}
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid rgba(244, 236, 240, 0.08);
+  margin: 1.5em 0;
+}
+.markdown-body strong { color: var(--ink); }
+
+/* ---------------------------------------------------------------- */
+/* Reduced motion — kill non-essential animation                    */
+/* ---------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Settings tab labels: hide when the sidebar container is narrow */
+.tab-label {
+  display: none;
+}
+
+@container (min-width: 280px) {
+  .tab-label {
+    display: inline;
+  }
+}
