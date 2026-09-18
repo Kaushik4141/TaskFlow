@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { differenceInSeconds, formatDistanceStrict, parseISO } from 'date-fns'
-import { BookOpenTextIcon, LoaderCircleIcon, PauseIcon, PlayIcon, SparklesIcon } from '@animateicons/react/lucide'
+import { BookOpenTextIcon, SparklesIcon } from '@animateicons/react/lucide'
 import { useTaskStore } from '../stores/taskStore'
 import type { Task } from '../types'
 import Documentation from './Documentation'
@@ -10,8 +10,6 @@ import { useStaggerContainer, useStaggerItem } from '../lib/motion'
 
 export default function ActiveTask({ task }: { task: Task }) {
   const {
-    startTask,
-    stopTask,
     addNote,
     sidecarReady,
     documentation,
@@ -47,13 +45,6 @@ export default function ActiveTask({ task }: { task: Task }) {
     setNote('')
   }
 
-  const handleTaskToggle = async () => {
-    if (task.status === 'active') {
-      await stopTask(task.id)
-    } else {
-      await startTask(task.id)
-    }
-  }
 
   const metricsV = useStaggerContainer(0.06)
   const metricV = useStaggerItem()
@@ -85,36 +76,13 @@ export default function ActiveTask({ task }: { task: Task }) {
             <h1 className="mt-1.5 text-balance text-2xl font-semibold tracking-tight text-white">{task.title}</h1>
             {task.description && <p className="mt-2 max-w-3xl text-sm leading-6 text-white/50">{task.description}</p>}
           </div>
-          <div className="flex flex-col items-end gap-3">
+          <div className="flex flex-col items-end gap-3 pt-8">
             <div className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-sm text-white/70">
               <span className={`relative flex h-2.5 w-2.5 ${sidecarReady ? '' : 'opacity-50'}`}>
                 {sidecarReady && <span className="absolute inline-flex h-full w-full animate-pulse-ring rounded-full bg-brand-400 opacity-50" />}
                 <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${sidecarReady ? 'bg-brand-500' : 'bg-white/30'}`} />
               </span>
               {sidecarReady ? 'AI ready' : 'AI loading...'}
-            </div>
-            <div className="flex flex-wrap justify-end gap-2">
-              <motion.button
-                type="button"
-                whileHover={{ y: -1 }}
-                whileTap={{ scale: 0.97 }}
-                className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
-                  task.status === 'active'
-                    ? 'border border-white/10 bg-white/[0.04] text-white/90 hover:border-white/20 hover:bg-white/[0.08] hover:text-white'
-                    : 'border border-white/15 bg-white/[0.08] text-white hover:border-white/25 hover:bg-white/[0.12] shadow-elevated'
-                }`}
-                disabled={isGenerating}
-                onClick={() => void handleTaskToggle()}
-              >
-                {isGenerating ? (
-                  <LoaderCircleIcon className="h-[18px] w-[18px] animate-spin" />
-                ) : task.status === 'active' ? (
-                  <PauseIcon className="h-[18px] w-[18px]" />
-                ) : (
-                  <PlayIcon className="h-[18px] w-[18px]" />
-                )}
-                {isGenerating ? 'Generating...' : task.status === 'active' ? 'Stop TaskFlow' : 'Start TaskFlow'}
-              </motion.button>
             </div>
             {isGenerating && (
               <p className="max-w-xs text-right text-xs leading-5 text-white/40">
