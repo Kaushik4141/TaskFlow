@@ -100,6 +100,22 @@ def get_supabase_credentials() -> Tuple[Optional[str], Optional[str]]:
     return url, key
 
 
+def get_authenticated_user() -> Tuple[Optional[str], Optional[str]]:
+    """Return (user_id, access_token) from SQLite settings if user is logged in via Supabase Auth."""
+    db_path = get_default_db_path()
+    if not db_path.exists():
+        return None, None
+    try:
+        con = sqlite3.connect(str(db_path))
+        cur = con.cursor()
+        cur.execute("SELECT key, value FROM settings WHERE key IN ('supabase_user_id', 'supabase_access_token')")
+        rows = dict(cur.fetchall())
+        con.close()
+        return rows.get("supabase_user_id"), rows.get("supabase_access_token")
+    except Exception:
+        return None, None
+
+
 def is_supabase_configured() -> bool:
     """Return True if valid Supabase credentials are found."""
     url, key = get_supabase_credentials()
@@ -116,6 +132,7 @@ def _supabase_request(
     data: Optional[Any] = None,
     params: Optional[Dict[str, str]] = None,
     headers_extra: Optional[Dict[str, str]] = None,
+    auth_token: Optional[str] = None,
 ) -> Any:
     """Execute a direct REST request against Supabase PostgREST API using standard urllib."""
     url, key = get_supabase_credentials()
@@ -130,9 +147,12 @@ def _supabase_request(
         query_string = urllib.parse.urlencode(params)
         full_url = f"{full_url}?{query_string}"
 
+    user_id, token_from_db = get_authenticated_user()
+    bearer = auth_token or token_from_db or key
+
     headers = {
         "apikey": key,
-        "Authorization": f"Bearer {key}",
+        "Authorization": f"Bearer {bearer}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
@@ -188,6 +208,9 @@ def sync_all_to_supabase() -> Dict[str, Any]:
     except Exception:
         pass
 
+    # Check authenticated user for multi-tenant isolation
+    user_id, _ = get_authenticated_user()
+
     # 1. Sync Vault Notes & manifest.json
     vault = get_vault_path()
     if vault and vault.exists():
@@ -204,14 +227,17 @@ def sync_all_to_supabase() -> Dict[str, Any]:
                     snippet = (file_path.stem + " " + raw_text)[:1000]
                     embedding = embedder.embed(snippet)
 
-                notes_batch.append({
+                note_item = {
                     "path": rel_path,
                     "title": file_path.stem,
                     "content": raw_text,
                     "metadata": {"type": "markdown_note"},
                     "file_hash": current_hash,
                     "embedding": embedding,
-                })
+                }
+                if user_id:
+                    note_item["user_id"] = user_id
+                notes_batch.append(note_item)
             except Exception as e:
                 report["errors"].append(f"vault note {file_path.name}: {e}")
 
@@ -220,14 +246,17 @@ def sync_all_to_supabase() -> Dict[str, Any]:
         if manifest_file.exists():
             try:
                 m_text = manifest_file.read_text(encoding="utf-8")
-                notes_batch.append({
+                manifest_item = {
                     "path": "TaskFlow/manifest.json",
                     "title": "Graph Topology Manifest",
                     "content": m_text,
                     "metadata": {"type": "manifest"},
                     "file_hash": compute_file_hash(m_text),
                     "embedding": None
-                })
+                }
+                if user_id:
+                    manifest_item["user_id"] = user_id
+                notes_batch.append(manifest_item)
             except Exception as e:
                 report["errors"].append(f"manifest.json: {e}")
 
@@ -274,7 +303,7 @@ def sync_all_to_supabase() -> Dict[str, Any]:
                     except Exception:
                         return []
 
-                rollups_batch.append({
+                r_item = {
                     "id": r["id"],
                     "project_slug": r["workstream_slug"],
                     "window_start": r["window_start"],
@@ -285,7 +314,10 @@ def sync_all_to_supabase() -> Dict[str, Any]:
                     "apps": parse_json(r.get("apps")),
                     "resources": parse_json(r.get("resources")),
                     "embedding": emb,
-                })
+                }
+                if user_id:
+                    r_item["user_id"] = user_id
+                rollups_batch.append(r_item)
 
             if rollups_batch:
                 _supabase_request(
@@ -306,6 +338,10 @@ def sync_all_to_supabase() -> Dict[str, Any]:
             edge_rows = [dict(r) for r in cur.fetchall()]
             con.close()
 
+            if user_id:
+                for edge in edge_rows:
+                    edge["user_id"] = user_id
+
             if edge_rows:
                 _supabase_request(
                     "cloud_graph_edges",
@@ -319,7 +355,32 @@ def sync_all_to_supabase() -> Dict[str, Any]:
             report["errors"].append(f"sqlite sync: {e}")
 
     report["success"] = len(report["errors"]) == 0
+
+    # Record sync stats in SQLite settings
+    if db_path.exists():
+        try:
+            import datetime
+            con = sqlite3.connect(str(db_path))
+            cur = con.cursor()
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            cur.execute("""
+                INSERT INTO settings (key, value) VALUES ('supabase_last_sync', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """, (now_iso,))
+            cur.execute("""
+                INSERT INTO settings (key, value) VALUES ('supabase_last_sync_stats', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """, (json.dumps(report),))
+            con.commit()
+            con.close()
+        except Exception:
+            pass
+
     return report
+
+
+# Alias for backward compatibility
+sync_to_supabase = sync_all_to_supabase
 
 
 # =====================================================================

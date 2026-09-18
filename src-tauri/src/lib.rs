@@ -179,6 +179,11 @@ pub fn run() {
             commands::approve_project_candidate,
             commands::reject_project_candidate,
             commands::query_graph_memory,
+            commands::get_cloud_status,
+            commands::save_cloud_settings,
+            commands::sync_cloud_now,
+            commands::get_google_oauth_url,
+            commands::sign_out_cloud,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TaskFlow");

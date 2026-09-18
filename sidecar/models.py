@@ -87,3 +87,9 @@ class QueryMemoryRequest(BaseModel):
     end_date: Optional[str] = None
     limit: int = 5
 
+
+class SessionRequest(BaseModel):
+    access_token: str
+    refresh_token: Optional[str] = None
+
+

@@ -136,7 +136,8 @@ CREATE OR REPLACE FUNCTION query_cloud_memory(
     query_embedding vector(384) DEFAULT NULL,
     filter_project text DEFAULT NULL,
     filter_time_bucket text DEFAULT NULL,
-    match_limit int DEFAULT 5
+    match_limit int DEFAULT 5,
+    filter_user_id UUID DEFAULT NULL
 )
 RETURNS TABLE (
     id TEXT,
@@ -169,7 +170,8 @@ BEGIN
             ELSE 1.0
         END AS similarity
     FROM cloud_rollups cr
-    WHERE (filter_project IS NULL OR cr.project_slug ILIKE filter_project)
+    WHERE (filter_user_id IS NULL OR cr.user_id = filter_user_id)
+      AND (filter_project IS NULL OR cr.project_slug ILIKE filter_project)
       AND (filter_time_bucket IS NULL OR to_char(cr.window_end, 'YYYY-MM') = filter_time_bucket)
     ORDER BY
         CASE
@@ -189,7 +191,8 @@ CREATE OR REPLACE FUNCTION search_vault_notes(
     query_embedding vector(384),
     match_threshold float DEFAULT 0.1,
     match_count int DEFAULT 5,
-    filter_prefix text DEFAULT ''
+    filter_prefix text DEFAULT '',
+    filter_user_id UUID DEFAULT NULL
 )
 RETURNS TABLE (
     id UUID,
@@ -212,9 +215,11 @@ BEGIN
         vn.metadata,
         1 - (vn.embedding <=> query_embedding) AS similarity
     FROM vault_notes vn
-    WHERE (1 - (vn.embedding <=> query_embedding)) >= match_threshold
+    WHERE (filter_user_id IS NULL OR vn.user_id = filter_user_id)
+      AND (1 - (vn.embedding <=> query_embedding)) >= match_threshold
       AND (filter_prefix = '' OR vn.path LIKE filter_prefix || '%')
     ORDER BY vn.embedding <=> query_embedding
     LIMIT match_count;
 END;
 $$;
+

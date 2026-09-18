@@ -115,17 +115,26 @@ def tool_query_graph_memory(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     limit: int = 5,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute high-speed, scope-first memory retrieval across historical rollups and graph edges.
 
     Prunes 100K+ nodes down to the relevant scope in < 5ms, avoiding keyword flood and context explosion.
     """
+    effective_user = user_id or os.environ.get("TASKFLOW_USER_ID")
+    if not effective_user and SUPABASE_CLIENT_AVAILABLE:
+        try:
+            auth_uid, _ = supabase_client.get_authenticated_user()
+            effective_user = auth_uid
+        except Exception:
+            pass
+
     db_path = get_default_db_path()
     if not db_path.exists():
         if SUPABASE_CLIENT_AVAILABLE and supabase_client.is_supabase_configured():
             try:
                 import cloud_agent
-                cm = cloud_agent.CloudMemory()
+                cm = cloud_agent.CloudMemory(user_id=effective_user)
                 return cm.query(query=query, project=project, time_bucket=time_bucket, limit=limit)
             except Exception as e:
                 return {"error": f"Local database not found and Cloud Mirror query failed: {e}"}
@@ -303,7 +312,7 @@ def tool_query_graph_memory(
     }
 
 
-def tool_read_manifest() -> Dict[str, Any]:
+def tool_read_manifest(user_id: Optional[str] = None) -> Dict[str, Any]:
     """Read the TaskFlow Graph Topology Manifest (manifest.json) for instant zero-hop routing."""
     tf_root = get_taskflow_root()
     manifest_file = tf_root / "manifest.json" if tf_root else None
@@ -312,7 +321,14 @@ def tool_read_manifest() -> Dict[str, Any]:
         if SUPABASE_CLIENT_AVAILABLE and supabase_client.is_supabase_configured():
             try:
                 import cloud_agent
-                cm = cloud_agent.CloudMemory()
+                effective_user = user_id or os.environ.get("TASKFLOW_USER_ID")
+                if not effective_user:
+                    try:
+                        auth_uid, _ = supabase_client.get_authenticated_user()
+                        effective_user = auth_uid
+                    except Exception:
+                        pass
+                cm = cloud_agent.CloudMemory(user_id=effective_user)
                 return cm.get_manifest()
             except Exception:
                 pass
@@ -404,7 +420,7 @@ def tool_get_connected_graph(entity: str, time_bucket: Optional[str] = None, lim
     return edges
 
 
-def tool_list_projects() -> List[Dict[str, Any]]:
+def tool_list_projects(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """List all tracked projects and workstreams with last active date and source."""
     projects = []
     seen = set()
@@ -450,15 +466,46 @@ def tool_list_projects() -> List[Dict[str, Any]]:
         except Exception:
             pass
 
+    # Cloud mirror fallback if local has no projects
+    if not projects and SUPABASE_CLIENT_AVAILABLE and supabase_client.is_supabase_configured():
+        try:
+            effective_user = user_id or os.environ.get("TASKFLOW_USER_ID")
+            if not effective_user:
+                try:
+                    auth_uid, _ = supabase_client.get_authenticated_user()
+                    effective_user = auth_uid
+                except Exception:
+                    pass
+            params = {"select": "project_slug,window_end", "order": "window_end.desc"}
+            if effective_user:
+                params["user_id"] = f"eq.{effective_user}"
+            rows = supabase_client._supabase_request("cloud_rollups", method="GET", params=params)
+            if isinstance(rows, list):
+                for r in rows:
+                    slug = r.get("project_slug")
+                    if slug and slug.lower() not in seen:
+                        seen.add(slug.lower())
+                        projects.append({
+                            "slug": slug,
+                            "title": slug.replace("-", " ").title(),
+                            "path": None,
+                            "modified_at": r.get("window_end"),
+                            "rollups_count": 1,
+                            "source": "cloud_mirror"
+                        })
+        except Exception:
+            pass
+
     return sorted(projects, key=lambda x: x["slug"])
 
 
-def tool_read_project(project_slug: str, max_lines: int = 50) -> Dict[str, Any]:
+def tool_read_project(project_slug: str, max_lines: int = 50, user_id: Optional[str] = None) -> Dict[str, Any]:
     """Read the top executive abstract and recent activity of a project workstream node.
 
     Args:
         project_slug: Identifier/slug of the project (e.g. 'TaskFlow').
         max_lines: Maximum lines to read from the top (default 50) to protect agent context.
+        user_id: Optional user identifier for cloud tenant partition.
     """
     tf_root = get_taskflow_root()
     candidates = []
@@ -475,7 +522,14 @@ def tool_read_project(project_slug: str, max_lines: int = 50) -> Dict[str, Any]:
         if SUPABASE_CLIENT_AVAILABLE and supabase_client.is_supabase_configured():
             try:
                 import cloud_agent
-                cm = cloud_agent.CloudMemory()
+                effective_user = user_id or os.environ.get("TASKFLOW_USER_ID")
+                if not effective_user:
+                    try:
+                        auth_uid, _ = supabase_client.get_authenticated_user()
+                        effective_user = auth_uid
+                    except Exception:
+                        pass
+                cm = cloud_agent.CloudMemory(user_id=effective_user)
                 return cm.read_project(project_slug, max_lines=max_lines)
             except Exception:
                 pass
@@ -584,7 +638,8 @@ MCP_TOOLS = [
                 "time_bucket": {"type": "string", "description": "Month filter in 'YYYY-MM' format (e.g. '2026-09')"},
                 "start_date": {"type": "string", "description": "Start date in 'YYYY-MM-DD' format"},
                 "end_date": {"type": "string", "description": "End date in 'YYYY-MM-DD' format"},
-                "limit": {"type": "integer", "description": "Maximum rollups to return (default: 5)"}
+                "limit": {"type": "integer", "description": "Maximum rollups to return (default: 5)"},
+                "user_id": {"type": "string", "description": "Optional Supabase authenticated user ID for multi-tenant memory partition"}
             }
         }
     },
@@ -666,8 +721,9 @@ MCP_TOOLS = [
 ]
 
 
-def dispatch_tool(name: str, args: Dict[str, Any]) -> Any:
+def dispatch_tool(name: str, args: Dict[str, Any], session_user_id: Optional[str] = None) -> Any:
     """Dispatch a tool call to its Python implementation."""
+    user_id = args.get("user_id") or session_user_id
     if name == "query_graph_memory":
         return tool_query_graph_memory(
             query=args.get("query"),
@@ -676,9 +732,10 @@ def dispatch_tool(name: str, args: Dict[str, Any]) -> Any:
             start_date=args.get("start_date"),
             end_date=args.get("end_date"),
             limit=args.get("limit", 5),
+            user_id=user_id,
         )
     elif name == "read_manifest":
-        return tool_read_manifest()
+        return tool_read_manifest(user_id=user_id)
     elif name == "read_monthly_digest":
         return tool_read_monthly_digest(year_month=args.get("year_month", ""))
     elif name == "get_connected_graph":
@@ -688,11 +745,12 @@ def dispatch_tool(name: str, args: Dict[str, Any]) -> Any:
             limit=args.get("limit", 10),
         )
     elif name == "list_projects":
-        return tool_list_projects()
+        return tool_list_projects(user_id=user_id)
     elif name == "read_project":
         return tool_read_project(
             project_slug=args.get("project_slug", ""),
             max_lines=args.get("max_lines", 50),
+            user_id=user_id,
         )
     elif name == "read_daily_note":
         return tool_read_daily_note(date=args.get("date", "today"))
@@ -710,7 +768,7 @@ def dispatch_tool(name: str, args: Dict[str, Any]) -> Any:
 # Pure Python JSON-RPC 2.0 Engine & SSE Server (Zero Dependencies)
 # =====================================================================
 
-def process_jsonrpc_request(req: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def process_jsonrpc_request(req: Dict[str, Any], session_user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Process a single JSON-RPC 2.0 MCP request and return the response."""
     req_id = req.get("id")
     method = req.get("method", "")
@@ -741,7 +799,7 @@ def process_jsonrpc_request(req: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         tool_name = params.get("name", "")
         tool_args = params.get("arguments", {})
         try:
-            out = dispatch_tool(tool_name, tool_args)
+            out = dispatch_tool(tool_name, tool_args, session_user_id=session_user_id)
             text_out = out if isinstance(out, str) else json.dumps(out, indent=2)
             res["result"] = {
                 "content": [
@@ -792,7 +850,7 @@ def run_pure_stdio_server() -> None:
             sys.stdout.flush()
 
 
-_SSE_SESSIONS: Dict[str, queue.Queue] = {}
+_SSE_SESSIONS: Dict[str, Dict[str, Any]] = {}
 _SSE_LOCK = threading.Lock()
 
 
@@ -812,10 +870,19 @@ class MCPHTTPHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path in ("/sse", "/sse/"):
+            query_params = parse_qs(parsed.query)
+            user_id = query_params.get("user_id", [None])[0] or self.headers.get("x-user-id")
+            if not user_id and SUPABASE_CLIENT_AVAILABLE:
+                try:
+                    auth_uid, _ = supabase_client.get_authenticated_user()
+                    user_id = auth_uid or os.environ.get("TASKFLOW_USER_ID")
+                except Exception:
+                    user_id = os.environ.get("TASKFLOW_USER_ID")
+
             session_id = uuid.uuid4().hex
             msg_queue: queue.Queue = queue.Queue()
             with _SSE_LOCK:
-                _SSE_SESSIONS[session_id] = msg_queue
+                _SSE_SESSIONS[session_id] = {"queue": msg_queue, "user_id": user_id}
 
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -824,7 +891,10 @@ class MCPHTTPHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
 
-            endpoint_msg = f"event: endpoint\r\ndata: /messages?session_id={session_id}\r\n\r\n"
+            endpoint_path = f"/messages?session_id={session_id}"
+            if user_id:
+                endpoint_path += f"&user_id={user_id}"
+            endpoint_msg = f"event: endpoint\r\ndata: {endpoint_path}\r\n\r\n"
             self.wfile.write(endpoint_msg.encode("utf-8"))
             self.wfile.flush()
 
@@ -846,6 +916,12 @@ class MCPHTTPHandler(http.server.BaseHTTPRequestHandler):
                 with _SSE_LOCK:
                     _SSE_SESSIONS.pop(session_id, None)
         elif parsed.path in ("/", "/health"):
+            active_uid = os.environ.get("TASKFLOW_USER_ID")
+            if not active_uid and SUPABASE_CLIENT_AVAILABLE:
+                try:
+                    active_uid, _ = supabase_client.get_authenticated_user()
+                except Exception:
+                    pass
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -855,6 +931,7 @@ class MCPHTTPHandler(http.server.BaseHTTPRequestHandler):
                 "version": "2.0.0",
                 "status": "ready",
                 "transport": "sse",
+                "active_user_id": active_uid,
                 "sse_url": "/sse",
                 "messages_url": "/messages?session_id=<uuid>",
                 "jsonrpc_post_url": "/mcp",
@@ -881,7 +958,16 @@ class MCPHTTPHandler(http.server.BaseHTTPRequestHandler):
 
         # Direct JSON-RPC mode (/mcp, /rpc, or /)
         if parsed.path in ("/mcp", "/rpc", "/"):
-            res = process_jsonrpc_request(req)
+            query_params = parse_qs(parsed.query)
+            direct_user_id = query_params.get("user_id", [None])[0] or self.headers.get("x-user-id")
+            if not direct_user_id and SUPABASE_CLIENT_AVAILABLE:
+                try:
+                    auth_uid, _ = supabase_client.get_authenticated_user()
+                    direct_user_id = auth_uid or os.environ.get("TASKFLOW_USER_ID")
+                except Exception:
+                    direct_user_id = os.environ.get("TASKFLOW_USER_ID")
+
+            res = process_jsonrpc_request(req, session_user_id=direct_user_id)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -895,9 +981,9 @@ class MCPHTTPHandler(http.server.BaseHTTPRequestHandler):
             session_id = query_params.get("session_id", [""])[0]
 
             with _SSE_LOCK:
-                target_queue = _SSE_SESSIONS.get(session_id)
+                session_data = _SSE_SESSIONS.get(session_id)
 
-            if not target_queue:
+            if not session_data:
                 self.send_response(404)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
@@ -905,7 +991,10 @@ class MCPHTTPHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": f"Session '{session_id}' not found or expired"}).encode("utf-8"))
                 return
 
-            res = process_jsonrpc_request(req)
+            target_queue = session_data["queue"]
+            session_user_id = session_data.get("user_id") or query_params.get("user_id", [None])[0] or self.headers.get("x-user-id")
+
+            res = process_jsonrpc_request(req, session_user_id=session_user_id)
             if res is not None:
                 target_queue.put(res)
 
@@ -953,8 +1042,12 @@ def main() -> None:
     parser.add_argument("--project", type=str, help="Project filter for CLI query")
     parser.add_argument("--time-bucket", type=str, help="Month bucket for CLI query (YYYY-MM)")
     parser.add_argument("--limit", type=int, default=5, help="Limit for CLI query")
+    parser.add_argument("--user-id", type=str, help="User ID for multi-tenant memory partition")
 
     args = parser.parse_args()
+
+    if args.user_id:
+        os.environ["TASKFLOW_USER_ID"] = args.user_id
 
     # Direct CLI Query Mode (For instant human/judge demo)
     if args.query is not None or args.project is not None:
@@ -964,7 +1057,8 @@ def main() -> None:
             query=args.query,
             project=args.project,
             time_bucket=args.time_bucket,
-            limit=args.limit
+            limit=args.limit,
+            user_id=args.user_id,
         )
         print(res.get("context_summary", json.dumps(res, indent=2)))
         return
