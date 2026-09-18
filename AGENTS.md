@@ -1,0 +1,32 @@
+# AGENTS.md
+
+## What this is
+TaskFlow: Windows and Linux **Tauri 2** desktop app (Rust core in `src-tauri/`, React/TS frontend in `src/`, Vite + pnpm) with a Python **FastAPI sidecar** (`sidecar/`, port 7878) doing AI summarize/filter/embed. Windows captures via UI Automation with local OCR fallback; Linux captures active-window metadata via Hyprland/X11 with optional piped OCR. Data goes into SQLite (`%APPDATA%\com.taskflow.desktop\taskflow.sqlite` on Windows, `~/.local/share/com.taskflow.desktop/taskflow.sqlite` on Linux) and an Obsidian vault. macOS support is second-class: no window titles, idle detection stubbed.
+
+## Commands
+- `cd src-tauri && cargo check --lib` — primary verification. **Do NOT run `cargo build` / `pnpm tauri build`**: the full link hits `LNK1318` (Windows PDB limit) on this machine.
+- `cd src-tauri && cargo test --lib` — full lib suite (wiki ingest, workstream writer, daily index, dust cleanup, slug hygiene, fallback hygiene, rollup reassignment, OCR post-processing/clamping, Linux X11 metadata parsing/classification, capture backoff, retention cutoff/timestamp-format regression, snapshot teardown).
+- `pnpm build` — frontend typecheck (tsc + vite). No lint/format/frontend-test config exists.
+- Sidecar deps: never `pip install` into system Python (numpy 2.x breaks torch). Use `sidecar/setup.sh` on Linux/macOS or `sidecar/setup.bat` on Windows; both create the repo-root `.venv-sidecar` expected by the app launcher.
+- Headless sidecar harness (boot, drive /summarize and /filter without the GUI): see `.agents/skills/run-taskflow/SKILL.md` — read it before running or debugging the app; it is the verified source for setup, gotchas, and troubleshooting. Caveat: its `.venv-sidecar` setup was authored but **not yet verified end-to-end** (see its TODO).
+
+## Architecture facts that change how you work
+- **Rollup engine is the memory spine**: `rollup/scheduler.rs` flushes ~10-min event windows → `rollups` table → workstream nodes (`TaskFlow/Projects/<slug>.md`, `## Activity Timeline`). Daily notes are a **derived index** rebuilt from rollups (`wiki/daily_index.rs`) — workstream nodes are the source of truth. `daily_index.rs` is the **sole writer** of `Memory/Daily/<date>.md`; `generate_documentation` deliberately does not touch the vault for memory tasks (the old two-writers split was removed).
+- **The vault graph is plain Obsidian wikilinks only** (hub kinds: Apps/Sites/Activity/Projects + daily notes). No edge table, no ML entity extraction. Project resolution uses the `wiki_known_projects` setting (Settings → Capture → Known Projects); without it, a window-title heuristic mints junk project pages. Registry-gated cleanup deletes machine-generated dust workstream pages and reassigns their roll-ups to Inbox.
+- App hub slugs are **lowercased** and extension-stripped case-insensitively (`Explorer.EXE` → `Apps/explorer.md`); project slugs preserve registry casing.
+- Technical AI errors (HTTP statuses, sidecar URLs) are **logged, never written to the vault** — `fallback_summary` only accepts the generic `FALLBACK_REASON_NO_AI` text.
+- Obsidian itself is capture-excluded (`privacy.rs`): the vault app is output, not an activity source (prevents recursive self-capture).
+- Sidecar runs from source in dev (`python sidecar/main.py`): editing `sidecar/*.py` takes effect on sidecar restart, no Rust recompile.
+- **OCR is a last-resort fallback, not a screenshotter** (`capture/ocr.rs`): UIA readers run first; only when they all return None does `PrintWindow` grab the window's pixels in memory and run WinRT `Windows.Media.Ocr` over them. Bitmaps **never touch disk** — preserve that (it's the anti-Recall stance in `PRODUCT.md`). Gated by `capture_ocr_fallback` (default on, Settings → Capture → Privacy), read per-capture from SQLite, and nested under `capture_screen_text` which gates the whole deep-capture path. Windows above 2560px are downscaled (`StretchBlt` + `HALFTONE`), not cropped.
+- **Linux capture is capability-based** (`capture/linux_reader.rs`): Hyprland titles come from `hyprctl`, X11 titles from `xprop`. Deep OCR is optional and requires `tesseract` plus `grim` (Hyprland) or `import`/`maim` (X11); image bytes are piped between processes and never touch disk. Unsupported Wayland compositors degrade to no active-window capture rather than failing the app.
+- Deep-capture failures back off per app (`window_monitor.rs::backoff_delay`, 30s doubling → 15m cap, reset on success) via `AppState::capture_failures`. A `None` capture is ambiguous (unreadable / OCR off / privacy-rejected / still painting), so this must stay a self-healing breaker, not a blacklist.
+- Cloud API key in SQLite is XOR-obfuscated with `SHA256(hostname)`, not encrypted. Preserve the scheme or migrate it deliberately; don't treat the DB as secret storage.
+- **Retention nulls `events.content`, it does not delete rows** (`rollup/scheduler.rs::prune_raw_content`, hourly): the row stays so the event feed and per-app stats keep working, while the verbatim screen text stops being retained. The cutoff is `min(now - raw_capture_retention_hours, rollup watermark)` so a short retention can't starve the rollup engine — unless rollups are off, in which case the watermark is ignored (no future consumer). **Build timestamp bounds in Rust (`Utc::to_rfc3339()`), never with SQLite `datetime('now', …)`**: `events.timestamp` uses `'T'` (0x54) and `datetime()` returns a space (0x20), so same-day comparisons silently match nothing. There's a regression test for exactly this.
+- The `snapshots` table/FTS5/triggers from commit `1e8adb4` were schema-only (never read or written) and are now dropped on migration (`schema.rs::drop_snapshot_artifacts`, idempotent). The three orphaned `events` columns it added (`snapshot_id`, `correlation_id`, `metadata_json`) are deliberately kept — SQLite `DROP COLUMN` is fragile and they cost nothing.
+- Dead-by-design traps: `events.relevance` (selected in queries, never written). Don't assume it works.
+
+## Conventions
+- `PRODUCT.md` is the design register: narrative-over-numbers (no charts/modals), keyboard-first, local-first, zero-friction capture. Check it before adding UI.
+- Vault output root is user-configured (`obsidian_vault_path` setting); everything writes under `<vault>/TaskFlow/`.
+- Never commit `opencode.json` — it contains a plaintext API key (currently untracked).
+- Workflow: feature branches (`v1-ui`, `engine-v2`, ...) merged to `main` via PR.
