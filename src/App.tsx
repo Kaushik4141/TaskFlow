@@ -111,7 +111,26 @@ export default function App() {
     <div className="relative h-screen w-screen overflow-hidden rounded-2xl bg-transparent">
       <AmbientBackground />
       <main className="relative z-10 flex h-full flex-col text-white">
-        <WindowControls />
+        {/* Top-Right Bar: Settings toggle + Window Controls */}
+        <div
+          data-tauri-drag-region="false"
+          className="absolute right-0 top-0 z-[60] flex h-8 items-center justify-end pr-1"
+        >
+          <button
+            type="button"
+            aria-label={settingsOpen ? 'Close settings' : 'Open settings'}
+            title={settingsOpen ? 'Close settings' : 'Settings'}
+            className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors mr-2 ${
+              settingsOpen
+                ? 'bg-brand-500/20 text-brand-200 ring-1 ring-brand-500/30'
+                : 'text-white/60 hover:bg-white/10 hover:text-white/90'
+            }`}
+            onClick={() => setSettingsOpen(!settingsOpen)}
+          >
+            <SettingsIcon className="h-4 w-4" />
+          </button>
+          <WindowControls className="flex h-full items-center justify-end" />
+        </div>
         {/* Main Content */}
         <div className="relative flex h-full min-h-0 flex-1 p-2 gap-2">
           {/* Sidebar */}
@@ -134,7 +153,7 @@ export default function App() {
                 </span>
               </div>
               
-              <div className="flex flex-col gap-1">
+              <div>
                 <button
                   type="button"
                   className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-white/60 transition-colors hover:bg-white/[0.04] hover:text-white/90"
@@ -147,18 +166,6 @@ export default function App() {
                   <kbd className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-medium text-white/40">
                     ⌘K
                   </kbd>
-                </button>
-                <button
-                  type="button"
-                  className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
-                    settingsOpen
-                      ? 'bg-brand-500/15 text-brand-200'
-                      : 'text-white/60 hover:bg-white/[0.04] hover:text-white/90'
-                  }`}
-                  onClick={() => setSettingsOpen(!settingsOpen)}
-                >
-                  <SettingsIcon className="h-[18px] w-[18px]" />
-                  <span>Settings</span>
                 </button>
               </div>
             </div>
@@ -197,7 +204,7 @@ export default function App() {
           {/* Main Workspace */}
           <div className="relative min-w-0 flex-1 rounded-xl bg-noir-950/80 overflow-hidden border border-white/[0.04]">
             {/* Drag Region for Main Area */}
-            <div data-tauri-drag-region className="absolute left-0 right-0 top-0 z-[40] h-8 cursor-grab active:cursor-grabbing" />
+            <div data-tauri-drag-region className="absolute left-0 right-48 top-0 z-[40] h-8 cursor-grab active:cursor-grabbing" />
             <AnimatePresence mode="wait">
               {selectedTask ? (
                 <motion.div

@@ -145,6 +145,7 @@ vite.config.ts.timestamp-*
 # Tauri & Rust
 src-tauri/target/
 src-tauri/sidecar/
+permissions/
 
 # Python sidecar
 sidecar/venv/

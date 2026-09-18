@@ -1,11 +1,15 @@
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { MinusIcon, KeySquareIcon, XIcon } from '@animateicons/react/lucide'
 
-export default function WindowControls() {
+interface WindowControlsProps {
+  className?: string
+}
+
+export default function WindowControls({ className }: WindowControlsProps = {}) {
   const appWindow = getCurrentWindow()
 
   return (
-    <div className="absolute right-0 top-0 z-[60] flex h-8 items-center justify-end">
+    <div className={className ?? "absolute right-0 top-0 z-[60] flex h-8 items-center justify-end"}>
       <button
         type="button"
         className="inline-flex h-full w-11 items-center justify-center text-white/50 transition-colors hover:bg-white/10 hover:text-white"
