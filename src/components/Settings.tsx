@@ -530,17 +530,17 @@ brain = CloudMemory(
 # Sub-15ms Scoped Graph Memory Query:
 ctx = brain.query("OAuth token bug", project="TaskFlow")
 print(ctx["context_summary"])`
-    } else {
+      const filterUserPayload = effectiveUserId ? `, "filter_user_id": "${effectiveUserId}"` : ''
       return `curl -s -X POST "${effectiveUrl}/rest/v1/rpc/query_cloud_memory" \\
   -H "apikey: ${effectiveKey}" \\
   -H "Authorization: Bearer ${effectiveKey}" \\
   -H "Content-Type: application/json" \\
-  -d '{"match_limit": 5, "filter_project": "TaskFlow"}'`
+  -d '{"match_limit": 5, "filter_project": "TaskFlow"${filterUserPayload}}'`
     }
   }
 
   const handleCopySnippet = async () => {
-    const text = getMcpSnippet()
+    const text = getMcpSnippet() || ''
     try {
       const { writeText } = await import('@tauri-apps/plugin-clipboard-manager')
       await writeText(text)

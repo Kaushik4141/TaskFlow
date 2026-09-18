@@ -211,6 +211,15 @@ def sync_all_to_supabase() -> Dict[str, Any]:
     # Check authenticated user for multi-tenant isolation
     user_id, _ = get_authenticated_user()
 
+    # Automatically claim unassigned legacy data if user is now authenticated
+    if user_id:
+        try:
+            _supabase_request("cloud_rollups", method="PATCH", data={"user_id": user_id}, params={"user_id": "is.null"})
+            _supabase_request("cloud_graph_edges", method="PATCH", data={"user_id": user_id}, params={"user_id": "is.null"})
+            _supabase_request("vault_notes", method="PATCH", data={"user_id": user_id}, params={"user_id": "is.null"})
+        except Exception:
+            pass
+
     # 1. Sync Vault Notes & manifest.json
     vault = get_vault_path()
     if vault and vault.exists():

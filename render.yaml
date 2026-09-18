@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: taskflow-mcp-brain
+    runtime: python
+    plan: free
+    buildCommand: "echo 'No external dependencies required for pure Python MCP engine'"
+    startCommand: "python sidecar/mcp_server.py"
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false

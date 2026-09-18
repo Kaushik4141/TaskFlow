@@ -1029,15 +1029,19 @@ def run_pure_sse_server(host: str, port: int) -> None:
 # =====================================================================
 
 def main() -> None:
+    default_port = int(os.environ.get("PORT", 8765))
+    default_host = os.environ.get("HOST", "0.0.0.0" if "PORT" in os.environ else "127.0.0.1")
+    default_transport = os.environ.get("MCP_TRANSPORT", "sse" if "PORT" in os.environ else "stdio")
+
     parser = argparse.ArgumentParser(description="TaskFlow Model Context Protocol (MCP) Server")
     parser.add_argument(
         "--transport",
         choices=["stdio", "sse"],
-        default="stdio",
-        help="Transport type: 'stdio' (default) or 'sse'"
+        default=default_transport,
+        help=f"Transport type: 'stdio' or 'sse' (default: {default_transport})"
     )
-    parser.add_argument("--host", default="127.0.0.1", help="Host for SSE server")
-    parser.add_argument("--port", type=int, default=8765, help="Port for SSE server")
+    parser.add_argument("--host", default=default_host, help=f"Host for SSE server (default: {default_host})")
+    parser.add_argument("--port", type=int, default=default_port, help=f"Port for SSE server (default: {default_port})")
     parser.add_argument("--query", type=str, help="Direct CLI query (testing mode)")
     parser.add_argument("--project", type=str, help="Project filter for CLI query")
     parser.add_argument("--time-bucket", type=str, help="Month bucket for CLI query (YYYY-MM)")
