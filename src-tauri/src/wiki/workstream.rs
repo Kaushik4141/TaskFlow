@@ -38,12 +38,23 @@ pub fn upsert_timeline_entry(
     let path = folder.join(format!("{workstream_slug}.md"));
 
     let marker = format!("<!-- rollup:{} -->", rollup.id);
-    let new_entry = format!(
-        "{marker}\n### {} — {}\n\n{}",
-        entry_window_label(rollup),
-        rollup.title.trim(),
-        entry_body.trim(),
-    );
+    let banner = entry_context_banner(rollup);
+    let new_entry = if banner.is_empty() {
+        format!(
+            "{marker}\n### {} — {}\n\n{}",
+            entry_window_label(rollup),
+            rollup.title.trim(),
+            entry_body.trim(),
+        )
+    } else {
+        format!(
+            "{marker}\n### {} — {}\n\n{}\n\n{}",
+            entry_window_label(rollup),
+            rollup.title.trim(),
+            banner,
+            entry_body.trim(),
+        )
+    };
 
     let existing = match fs::read_to_string(&path) {
         Ok(content) => content,
@@ -90,12 +101,65 @@ fn bootstrap_page(slug: &str, rollup: &Rollup, first_entry: &str) -> String {
         .map(|end| end.with_timezone(&Local).format("%Y-%m-%d").to_string())
         .unwrap_or_else(|_| Local::now().format("%Y-%m-%d").to_string());
     format!(
-        "---\ntype: hub_page\nkind: Projects\nslug: {slug}\nlast_touched: {date}\n---\n\n\
+        "---\ntype: hub_page\nkind: Projects\nslug: {slug}\ntags:\n  - taskflow/project\nlast_touched: {date}\n---\n\n\
          # Projects/{slug}\n\n\
          Rolling workstream node — TaskFlow appends one entry per activity roll-up.\n\n\
          {TIMELINE_HEADING}\n\n{}\n",
         first_entry.trim(),
     )
+}
+
+/// Build a contextual metadata banner for an activity timeline entry.
+/// Links the entry to the daily index note, referenced application hubs, and site hubs.
+/// E.g. `> **Date**: [[Memory/Daily/2026-09-18]] · **Tools**: [[Apps/cursor]] · **Resources**: [[Sites/github.com]]`
+pub fn entry_context_banner(rollup: &Rollup) -> String {
+    let date = chrono::DateTime::parse_from_rfc3339(&rollup.window_end)
+        .ok()
+        .map(|end| end.with_timezone(&Local).format("%Y-%m-%d").to_string())
+        .or_else(|| {
+            chrono::DateTime::parse_from_rfc3339(&rollup.window_start)
+                .ok()
+                .map(|s| s.with_timezone(&Local).format("%Y-%m-%d").to_string())
+        });
+    let mut segments = Vec::new();
+    if let Some(d) = date {
+        segments.push(format!("**Date**: [[Memory/Daily/{d}]]"));
+    }
+    if let Some(raw) = rollup.apps.as_deref() {
+        if let Ok(apps) = serde_json::from_str::<Vec<String>>(raw) {
+            let mut app_links = std::collections::BTreeSet::new();
+            for app in apps {
+                if let Some(slug) = super::links::hub_slug_for_app(&app) {
+                    app_links.insert(format!("[[Apps/{slug}]]"));
+                }
+            }
+            if !app_links.is_empty() {
+                let joined = app_links.into_iter().collect::<Vec<_>>().join(", ");
+                segments.push(format!("**Tools**: {joined}"));
+            }
+        }
+    }
+    if let Some(raw) = rollup.resources.as_deref() {
+        if let Ok(urls) = serde_json::from_str::<Vec<String>>(raw) {
+            let mut site_links = std::collections::BTreeSet::new();
+            for url in urls {
+                if url.starts_with("http") {
+                    if let Some(domain) = super::links::domain_from_url(&url) {
+                        site_links.insert(format!("[[Sites/{domain}]]"));
+                    }
+                }
+            }
+            if !site_links.is_empty() {
+                let joined = site_links.into_iter().collect::<Vec<_>>().join(", ");
+                segments.push(format!("**Resources**: {joined}"));
+            }
+        }
+    }
+    if segments.is_empty() {
+        String::new()
+    } else {
+        format!("> {}", segments.join(" · "))
+    }
 }
 
 /// `YYYY-MM-DD HH:MM–HH:MM` in local time, from the roll-up's UTC window.
@@ -137,8 +201,11 @@ fn split_entries(body: &[String]) -> Vec<String> {
     let mut entries: Vec<String> = Vec::new();
     let mut current: Vec<String> = Vec::new();
     for line in body {
-        let starts_entry =
-            line.trim_start().starts_with("<!-- rollup:") || line.trim_start().starts_with("### ");
+        let has_marker = current
+            .iter()
+            .any(|l| l.trim_start().starts_with("<!-- rollup:"));
+        let starts_entry = line.trim_start().starts_with("<!-- rollup:")
+            || (line.trim_start().starts_with("### ") && !has_marker);
         if starts_entry && !current.is_empty() {
             entries.push(current.join("\n").trim().to_string());
             current.clear();
@@ -275,4 +342,23 @@ mod tests {
             "timeline before synthesis anchor: {page}"
         );
     }
+
+    #[test]
+    fn timeline_entry_renders_rich_context_banner_with_wikilinks() {
+        let vault = fresh_vault("rich_context");
+        let mut r = rollup("r1", "2026-07-27T09:00:00+00:00", "2026-07-27T09:10:00+00:00", "Coding window");
+        r.apps = Some(serde_json::to_string(&vec!["Code.exe".to_string(), "Firefox".to_string()]).unwrap());
+        r.resources = Some(serde_json::to_string(&vec!["https://github.com/Kaushik4141/TaskFlow".to_string()]).unwrap());
+
+        upsert_timeline_entry(&vault, "TaskFlow", &r, "Implemented feature").expect("write ok");
+        let path = vault.join("TaskFlow").join("Projects").join("TaskFlow.md");
+        let page = std::fs::read_to_string(&path).expect("page exists");
+
+        assert!(page.contains("tags:\n  - taskflow/project"), "frontmatter tags present: {page}");
+        assert!(page.contains("[[Memory/Daily/"), "daily note link present: {page}");
+        assert!(page.contains("[[Apps/code]]"), "app link present: {page}");
+        assert!(page.contains("[[Apps/firefox]]"), "firefox link present: {page}");
+        assert!(page.contains("[[Sites/github.com]]"), "site link present: {page}");
+    }
 }
+

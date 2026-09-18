@@ -26,9 +26,11 @@ LOW_TRUST_APPS = [
 ]
 
 EXCLUDED_APPS = [
-    "1password", "bitwarden", "lastpass", "keychain",
-    "spotify", "music", "vlc", "mpv",
-    "netflix", "youtube",
+    "1password", "bitwarden", "keepass", "lastpass", "dashlane",
+    "nordpass", "proton pass", "auth", "authenticator", "duo mobile",
+    "yubico", "keychain", "credential manager", "certificate manager",
+    "spotify", "music", "vlc", "mpv", "netflix", "youtube", "hulu",
+    "prime video", "disney", "obsidian",
 ]
 
 STOPWORDS = {

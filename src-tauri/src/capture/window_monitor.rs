@@ -17,6 +17,7 @@ use super::{
     cleaner::{clean_captured_content, is_meaningful_content},
     types::CapturedContent,
     url_extractor,
+    work_classifier,
 };
 
 #[cfg(target_os = "windows")]
@@ -107,6 +108,46 @@ pub fn start(app: AppHandle, state: AppState) {
                     continue;
                 }
 
+                // Exclude non-productive activity on dual-use platforms (YouTube, Reddit, Twitter, etc.)
+                // right at the ingestion layer so it never enters the SQLite storage layer.
+                let extracted_url =
+                    url_extractor::extract_from_title(&snapshot.app_name, &snapshot.window_title);
+                let likely_url = extracted_url.as_ref().and_then(|u| u.likely_url.as_deref());
+
+                if work_classifier::is_dual_use_platform(
+                    &snapshot.app_name,
+                    &snapshot.window_title,
+                    likely_url,
+                ) {
+                    let task_id_opt = active_task_id(&state);
+                    let active_task = task_id_opt.and_then(|tid| {
+                        tauri::async_runtime::block_on(crate::database::tasks::get_task_by_id(
+                            &state.db, &tid,
+                        ))
+                        .ok()
+                    });
+                    let task_title = active_task.as_ref().map(|t| t.title.as_str());
+                    let task_desc = active_task.as_ref().and_then(|t| t.description.as_deref());
+
+                    if !work_classifier::should_capture_activity(
+                        &snapshot.app_name,
+                        &snapshot.window_title,
+                        likely_url,
+                        task_title,
+                        task_desc,
+                        &[],
+                    ) {
+                        log::debug!(
+                            "[taskflow:capture] Dropped non-productive activity at ingestion: {} - {}",
+                            snapshot.app_name,
+                            snapshot.window_title
+                        );
+                        last_window = Some(snapshot);
+                        thread::sleep(Duration::from_secs(1));
+                        continue;
+                    }
+                }
+
                 let task_id = active_task_id(&state).or_else(|| ensure_daily_capture_task(&state));
                 let mut stored_event_id = None;
                 if changed && capture_window_titles {
@@ -114,7 +155,23 @@ pub fn start(app: AppHandle, state: AppState) {
                         emit_and_store_title_only(&app, &state, &snapshot, task_id.clone());
                 }
 
-                if capture_screen_text
+                let is_sensitive_window = state
+                    .privacy_filter
+                    .read()
+                    .map(|f| f.is_sensitive_window_for_deep_capture(&snapshot.window_title))
+                    .unwrap_or(false);
+
+                if is_sensitive_window {
+                    eprintln!(
+                        "[taskflow:capture] Skipping deep capture for sensitive window: {} - {}",
+                        snapshot.app_name, snapshot.window_title
+                    );
+                    log::info!(
+                        "Skipping deep capture for sensitive window: {} - {}",
+                        snapshot.app_name,
+                        snapshot.window_title
+                    );
+                } else if capture_screen_text
                     && task_id.is_some()
                     && should_deep_capture(&window_key, changed, &last_deep_read)
                     && !in_capture_backoff(&state, &snapshot.app_name)
