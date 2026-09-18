@@ -150,8 +150,12 @@ class LLMSummarizer:
             activity_context=build_activity_context(context),
         )
         if mode == "local_ai":
+            method = f"local_ai (Ollama: {ollama_model} @ {ollama_url})"
+            print(f"SUMMARIZE: LLMSummarizer using method '{method}'", flush=True)
             markdown = await self._call_ollama(prompt, ollama_url, ollama_model)
         elif mode == "cloud_ai":
+            method = f"cloud_ai (Model: {cloud_model} @ {cloud_base_url})"
+            print(f"SUMMARIZE: LLMSummarizer using method '{method}'", flush=True)
             markdown = await self._call_cloud(prompt, cloud_base_url, cloud_api_key, cloud_model)
         else:
             raise ValueError(f"Unknown mode: {mode}")
@@ -162,6 +166,7 @@ class LLMSummarizer:
             "resources": context["resources"][:10],
             "generated_locally": mode == "local_ai",
             "mode": mode,
+            "method": method,
         }
 
     async def _call_ollama(self, prompt: str, url: str, model: str) -> str:

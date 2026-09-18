@@ -21,4 +21,5 @@ class ExtractiveSummarizer:
         )
         context["event_count"] = len(request.relevant_events)
         result = self.basic_summarizer.summarize(context)
+        print(f"SUMMARIZE: ExtractiveSummarizer finished using method '{result.get('method', 'basic')}'", flush=True)
         return SummarizeResponse(**result)

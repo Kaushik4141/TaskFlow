@@ -70,9 +70,24 @@ async def summarize(request: SummarizeRequest):
     if context_builder is None or basic_summarizer is None:
         raise HTTPException(status_code=503, detail="Summarizer is not ready")
 
+    mode = getattr(request.mode, "value", request.mode)
+
+    if mode == "basic":
+        method_desc = "basic (extractive)"
+    elif mode == "local_ai":
+        ollama_model = request.ollama_model or "llama3.1:8b"
+        ollama_url = request.ollama_url or "http://localhost:11434"
+        method_desc = f"local_ai (Ollama: {ollama_model} @ {ollama_url})"
+    elif mode == "cloud_ai":
+        cloud_model = request.cloud_model or "default"
+        cloud_url = request.cloud_base_url or "unknown"
+        method_desc = f"cloud_ai (Model: {cloud_model} @ {cloud_url})"
+    else:
+        method_desc = f"unknown ({mode})"
+
     print(
-        f"SUMMARIZE: mode={request.mode} task='{request.task_title}' "
-        f"events={len(request.relevant_events)}",
+        f"SUMMARIZE: using method '{method_desc}' (mode={mode}, task='{request.task_title}', "
+        f"events={len(request.relevant_events)})",
         flush=True,
     )
 
@@ -90,8 +105,6 @@ async def summarize(request: SummarizeRequest):
         f"signals={len(context['signals'])} pages={len(context['timeline'])}",
         flush=True,
     )
-
-    mode = getattr(request.mode, "value", request.mode)
 
     try:
         if mode == "basic":
@@ -111,11 +124,17 @@ async def summarize(request: SummarizeRequest):
         else:
             result = basic_summarizer.summarize(context)
     except Exception as error:
-        print(f"SUMMARIZE ERROR: {_safe_error(error, request.cloud_api_key)}", flush=True)
+        fallback_method = "basic (fallback after error)"
+        print(
+            f"SUMMARIZE ERROR: {_safe_error(error, request.cloud_api_key)} - falling back to method '{fallback_method}'",
+            flush=True,
+        )
         result = basic_summarizer.summarize(context)
+        result["method"] = fallback_method
         result["markdown"] = "> AI summary unavailable, showing basic summary.\n\n" + result["markdown"]
 
-    print(f"DONE: {result['summary'][:80]}", flush=True)
+    actual_method = result.get("method", method_desc)
+    print(f"DONE: method='{actual_method}' summary='{result['summary'][:80]}'", flush=True)
     return result
 
 
