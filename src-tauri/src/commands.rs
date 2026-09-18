@@ -511,6 +511,7 @@ pub struct CloudStatus {
     pub user_email: Option<String>,
     pub user_name: Option<String>,
     pub user_avatar: Option<String>,
+    pub mcp_gateway_url: Option<String>,
 }
 
 #[tauri::command]
@@ -529,6 +530,8 @@ pub async fn get_cloud_status(state: State<'_, AppState>) -> Result<CloudStatus,
     let user_email = settings.get("supabase_user_email").cloned();
     let user_name = settings.get("supabase_user_name").cloned();
     let user_avatar = settings.get("supabase_user_avatar").cloned();
+    let mcp_gateway_url = settings.get("mcp_gateway_url").cloned()
+        .or_else(|| Some("https://taskflow-mcp-brain.onrender.com".to_string()));
 
     Ok(CloudStatus {
         configured,
@@ -542,6 +545,7 @@ pub async fn get_cloud_status(state: State<'_, AppState>) -> Result<CloudStatus,
         user_email,
         user_name,
         user_avatar,
+        mcp_gateway_url,
     })
 }
 
@@ -551,10 +555,14 @@ pub async fn save_cloud_settings(
     supabase_url: String,
     supabase_key: String,
     auto_sync: bool,
+    mcp_gateway_url: Option<String>,
 ) -> Result<(), String> {
     update_setting(state.clone(), "supabase_url".to_string(), supabase_url).await?;
     update_setting(state.clone(), "supabase_key".to_string(), supabase_key).await?;
-    update_setting(state, "supabase_auto_sync".to_string(), if auto_sync { "true".to_string() } else { "false".to_string() }).await?;
+    update_setting(state.clone(), "supabase_auto_sync".to_string(), if auto_sync { "true".to_string() } else { "false".to_string() }).await?;
+    if let Some(gateway) = mcp_gateway_url {
+        update_setting(state, "mcp_gateway_url".to_string(), gateway).await?;
+    }
     Ok(())
 }
 

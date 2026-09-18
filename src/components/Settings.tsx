@@ -382,7 +382,9 @@ function CloudSection() {
   const [showKey, setShowKey] = useState(false)
   const [manualUserId, setManualUserId] = useState('')
   const [showManualAuth, setShowManualAuth] = useState(false)
-  const [activeMcpTab, setActiveMcpTab] = useState<'claude' | 'cursor' | 'hermes' | 'rpc'>('claude')
+  const [mcpGatewayUrl, setMcpGatewayUrl] = useState('https://taskflow-mcp-brain.onrender.com')
+  const [mcpMode, setMcpMode] = useState<'cloud' | 'local'>('cloud')
+  const [activeMcpTab, setActiveMcpTab] = useState<'cursor' | 'claude' | 'hermes' | 'rpc'>('cursor')
   const [copied, setCopied] = useState(false)
 
   const fetchStatus = async () => {
@@ -392,6 +394,7 @@ function CloudSection() {
       setUrlInput(data.supabaseUrl || 'https://cxarbuqzseembonxgpyw.supabase.co')
       setKeyInput(data.supabaseKey || '')
       setAutoSyncInput(data.autoSync)
+      if (data.mcpGatewayUrl) setMcpGatewayUrl(data.mcpGatewayUrl)
       if (data.userId) setManualUserId(data.userId)
     } catch (err) {
       console.error('Failed to load cloud status:', err)
@@ -410,6 +413,7 @@ function CloudSection() {
         supabaseUrl: urlInput.trim(),
         supabaseKey: keyInput.trim(),
         autoSync: autoSyncInput,
+        mcpGatewayUrl: mcpGatewayUrl.trim(),
       })
       if (manualUserId.trim() && !status.authenticated) {
         await invoke('update_setting', {
@@ -483,59 +487,107 @@ function CloudSection() {
   }
 
   const effectiveUserId = status.userId || manualUserId || 'default_user'
-  const effectiveUrl = status.supabaseUrl || urlInput || 'https://cxarbuqzseembonxgpyw.supabase.co'
-  const effectiveKey = status.supabaseKey || keyInput || 'sb_publishable_...'
+  const activeBaseUrl = mcpMode === 'cloud'
+    ? (mcpGatewayUrl.trim().replace(/\/+$/, '') || 'https://taskflow-mcp-brain.onrender.com')
+    : 'http://localhost:8765'
 
   const getMcpSnippet = () => {
-    if (activeMcpTab === 'claude') {
+    if (activeMcpTab === 'cursor') {
       return JSON.stringify(
         {
           mcpServers: {
             taskflow: {
-              command: 'python3',
-              args: ['/home/kaushi/Projects/TaskFlow/sidecar/mcp_server.py', '--user-id', effectiveUserId],
-              env: {
-                SUPABASE_URL: effectiveUrl,
-                SUPABASE_KEY: effectiveKey,
-                TASKFLOW_USER_ID: effectiveUserId,
+              url: `${activeBaseUrl}/sse?user_id=${effectiveUserId}`,
+            },
+          },
+        },
+        null,
+        2
+      )
+    } else if (activeMcpTab === 'claude') {
+      if (mcpMode === 'cloud') {
+        return JSON.stringify(
+          {
+            mcpServers: {
+              taskflow: {
+                command: 'npx',
+                args: [
+                  '-y',
+                  'mcp-remote',
+                  `${activeBaseUrl}/sse?user_id=${effectiveUserId}`,
+                ],
               },
             },
           },
-        },
-        null,
-        2
-      )
-    } else if (activeMcpTab === 'cursor') {
-      return JSON.stringify(
-        {
-          mcpServers: {
-            taskflow: {
-              url: `http://localhost:8765/sse?user_id=${effectiveUserId}`,
+          null,
+          2
+        )
+      } else {
+        return JSON.stringify(
+          {
+            mcpServers: {
+              taskflow: {
+                command: 'python3',
+                args: [
+                  '-m',
+                  'sidecar.mcp_server',
+                  '--user-id',
+                  effectiveUserId,
+                ],
+              },
             },
           },
-        },
-        null,
-        2
-      )
+          null,
+          2
+        )
+      }
     } else if (activeMcpTab === 'hermes') {
-      return `# In Hermes Agent / Cloud Container:
-from cloud_agent import CloudMemory
+      return `# Zero DB credentials required — connects securely via TaskFlow MCP Gateway:
+import json
+import urllib.request
 
-brain = CloudMemory(
-    supabase_url="${effectiveUrl}",
-    supabase_key="${effectiveKey}",
-    user_id="${effectiveUserId}"
-)
+def query_taskflow_memory(query: str, project: str = "TaskFlow") -> str:
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "query_graph_memory",
+            "arguments": {
+                "query": query,
+                "project": project,
+                "user_id": "${effectiveUserId}",
+            },
+        },
+    }
+    req = urllib.request.Request(
+        "${activeBaseUrl}/mcp",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        res = json.loads(resp.read().decode("utf-8"))
+        return res["result"]["content"][0]["text"]
 
-# Sub-15ms Scoped Graph Memory Query:
-ctx = brain.query("OAuth token bug", project="TaskFlow")
-print(ctx["context_summary"])`
-      const filterUserPayload = effectiveUserId ? `, "filter_user_id": "${effectiveUserId}"` : ''
-      return `curl -s -X POST "${effectiveUrl}/rest/v1/rpc/query_cloud_memory" \\
-  -H "apikey: ${effectiveKey}" \\
-  -H "Authorization: Bearer ${effectiveKey}" \\
+# Example:
+print(query_taskflow_memory("OAuth token refresh bug"))`
+    } else {
+      return `# Query your personal memory partition directly via the MCP Gateway (No DB credentials needed):
+curl -s -X POST "${activeBaseUrl}/mcp" \\
   -H "Content-Type: application/json" \\
-  -d '{"match_limit": 5, "filter_project": "TaskFlow"${filterUserPayload}}'`
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "query_graph_memory",
+      "arguments": {
+        "query": "TaskFlow",
+        "project": "TaskFlow",
+        "user_id": "${effectiveUserId}"
+      }
+    }
+  }'`
     }
   }
 
@@ -771,12 +823,54 @@ print(ctx["context_summary"])`
         </div>
 
         <p className="text-xs text-white/50">
-          Connect external AI agents (Claude Desktop, Cursor, Hermes, OpenClaw) directly to your personal memory partition:
+          Connect external AI agents directly to your personal memory partition. All queries are securely authenticated via your User ID without exposing database keys.
         </p>
+
+        {/* Security & Zero Credentials Badge */}
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-300">
+          <CheckIcon className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+          <span>Zero Database Credentials Exposed: AI clients communicate solely through the MCP Gateway with scoped User ID filtering.</span>
+        </div>
+
+        {/* Gateway Mode Switcher: Cloud vs Local */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-noir-900/60 p-1 text-xs">
+            <button
+              type="button"
+              onClick={() => setMcpMode('cloud')}
+              className={`rounded px-2.5 py-1 transition-colors ${
+                mcpMode === 'cloud' ? 'bg-brand-500/20 text-brand-300 font-medium' : 'text-white/40 hover:text-white/70'
+              }`}
+            >
+              ☁️ Cloud Gateway (Render 24/7)
+            </button>
+            <button
+              type="button"
+              onClick={() => setMcpMode('local')}
+              className={`rounded px-2.5 py-1 transition-colors ${
+                mcpMode === 'local' ? 'bg-brand-500/20 text-brand-300 font-medium' : 'text-white/40 hover:text-white/70'
+              }`}
+            >
+              💻 Local Gateway (localhost)
+            </button>
+          </div>
+
+          {mcpMode === 'cloud' && (
+            <div className="flex items-center gap-1.5 flex-1 min-w-[240px]">
+              <input
+                type="text"
+                value={mcpGatewayUrl}
+                onChange={(e) => setMcpGatewayUrl(e.target.value)}
+                placeholder="https://taskflow-mcp-brain.onrender.com"
+                className="w-full rounded-lg border border-white/10 bg-noir-950/80 px-2.5 py-1 font-mono text-[11px] text-white placeholder:text-white/20 focus:border-brand-500/50 focus:outline-none"
+              />
+            </div>
+          )}
+        </div>
 
         {/* MCP client switcher tabs */}
         <div className="flex gap-1 border-b border-white/[0.06] pb-2 text-xs">
-          {(['claude', 'cursor', 'hermes', 'rpc'] as const).map((tabKey) => (
+          {(['cursor', 'claude', 'hermes', 'rpc'] as const).map((tabKey) => (
             <button
               key={tabKey}
               type="button"
@@ -785,13 +879,13 @@ print(ctx["context_summary"])`
                 activeMcpTab === tabKey ? 'bg-white/10 text-white font-medium' : 'text-white/40 hover:text-white/70'
               }`}
             >
-              {tabKey === 'claude'
+              {tabKey === 'cursor'
+                ? 'Cursor IDE (Remote SSE)'
+                : tabKey === 'claude'
                 ? 'Claude Desktop'
-                : tabKey === 'cursor'
-                ? 'Cursor / Remote SSE'
                 : tabKey === 'hermes'
-                ? 'Hermes Cloud Client'
-                : 'Direct REST RPC'}
+                ? 'Hermes / Python Agent'
+                : 'Direct JSON-RPC'}
             </button>
           ))}
         </div>
