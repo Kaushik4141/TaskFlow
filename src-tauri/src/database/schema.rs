@@ -189,6 +189,38 @@ pub async fn run_migrations(db: &SqlitePool) -> Result<(), sqlx::Error> {
     db.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)")
         .await?;
 
+    // Index rollups for sub-millisecond range scans and project filtering at 100K+ scale.
+    db.execute("CREATE INDEX IF NOT EXISTS idx_rollups_window_range ON rollups(window_start, window_end)")
+        .await?;
+    db.execute("CREATE INDEX IF NOT EXISTS idx_rollups_workstream_window ON rollups(workstream_slug, window_start)")
+        .await?;
+    db.execute("CREATE INDEX IF NOT EXISTS idx_rollups_created_at ON rollups(created_at)")
+        .await?;
+
+    // Graph edges table for sub-millisecond multi-hop relationship traversal and clustering.
+    db.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS graph_edges (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_entity  TEXT NOT NULL,
+            target_entity  TEXT NOT NULL,
+            relation_type  TEXT NOT NULL,
+            weight         REAL NOT NULL DEFAULT 1.0,
+            time_bucket    TEXT NOT NULL,
+            last_seen      TEXT NOT NULL,
+            metadata_json  TEXT
+        );
+        "#,
+    )
+    .await?;
+
+    db.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_source_bucket ON graph_edges(source_entity, time_bucket, weight DESC)")
+        .await?;
+    db.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_target_bucket ON graph_edges(target_entity, time_bucket)")
+        .await?;
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_edges_unique ON graph_edges(source_entity, target_entity, relation_type, time_bucket)")
+        .await?;
+
     drop_snapshot_artifacts(db).await?;
 
     Ok(())

@@ -1857,6 +1857,31 @@ fn find_snippet(text: &str, query: &str, max_len: usize) -> String {
     snippet
 }
 
+#[tauri::command]
+pub async fn query_graph_memory(
+    state: State<'_, AppState>,
+    query: Option<String>,
+    project: Option<String>,
+    time_bucket: Option<String>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+    limit: Option<usize>,
+) -> Result<crate::database::retrieval::GraphQueryResult, String> {
+    crate::database::retrieval::query_graph_memory(
+        &state.db,
+        crate::database::retrieval::GraphQueryRequest {
+            query,
+            project,
+            time_bucket,
+            start_date,
+            end_date,
+            limit,
+        },
+    )
+    .await
+    .map_err(|err| format!("Graph memory retrieval failed: {err}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
