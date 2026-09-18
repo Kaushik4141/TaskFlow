@@ -1,8 +1,9 @@
 import { Dispatch, FormEvent, ReactNode, SetStateAction, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { invoke } from '@tauri-apps/api/core'
-import { BrainIcon, CircleCheckIcon, BookOpenTextIcon, FolderOpenIcon, GitBranchIcon, KeyRoundIcon, LinkIcon, CodeXmlIcon, ShieldCheckIcon, Trash2Icon, XIcon, ZapIcon, SparklesIcon, EyeIcon } from '@animateicons/react/lucide'
+import { BrainIcon, CircleCheckIcon, BookOpenTextIcon, FolderOpenIcon, GitBranchIcon, KeyRoundIcon, LinkIcon, CodeXmlIcon, ShieldCheckIcon, Trash2Icon, XIcon, ZapIcon, SparklesIcon, EyeIcon, TerminalIcon } from '@animateicons/react/lucide'
 import SummarySettings from './SummarySettings'
+import EventFeed from './EventFeed'
 import { CandidateCard } from './CandidateCard'
 import { useTaskStore } from '../stores/taskStore'
 import { useProjectCandidates } from '../hooks/useProjectCandidates'
@@ -19,7 +20,7 @@ export default function Settings() {
   const { integrations, deleteIntegration, updatePrivacySettings, updateCaptureWorkflow, selectedTask, documentation } = useTaskStore()
   const [connecting, setConnecting] = useState<Integration['provider'] | null>(null)
   const [showDeepCapture, setShowDeepCapture] = useState(false)
-  const [activeSection, setActiveSection] = useState<'capture' | 'integrations' | 'summary' | 'appearance'>('capture')
+  const [activeSection, setActiveSection] = useState<'capture' | 'integrations' | 'summary' | 'appearance' | 'developer'>('capture')
   const [privacyLoaded, setPrivacyLoaded] = useState(false)
   const [privacy, setPrivacy] = useState({
     windowTitles: true,
@@ -210,6 +211,7 @@ export default function Settings() {
     { id: 'integrations' as const, icon: <LinkIcon className="h-4 w-4" />, label: 'Integrations' },
     { id: 'summary' as const, icon: <SparklesIcon className="h-4 w-4" />, label: 'Summary' },
     { id: 'appearance' as const, icon: <EyeIcon className="h-4 w-4" />, label: 'Theme' },
+    { id: 'developer' as const, icon: <TerminalIcon className="h-4 w-4" />, label: 'Dev' },
   ]
 
   return (
@@ -293,7 +295,7 @@ export default function Settings() {
             >
               <SummarySettings />
             </motion.div>
-          ) : (
+          ) : activeSection === 'appearance' ? (
             <motion.div
               key="appearance"
               initial={{ opacity: 0, y: 6 }}
@@ -302,6 +304,16 @@ export default function Settings() {
               transition={{ duration: 0.15 }}
             >
               <AppearanceSection />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="developer"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.15 }}
+            >
+              <DeveloperSection />
             </motion.div>
           )}
         </AnimatePresence>
@@ -320,6 +332,20 @@ export default function Settings() {
 /* ---------------------------------------------------------------- */
 /* Sections                                                          */
 /* ---------------------------------------------------------------- */
+
+function DeveloperSection() {
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold tracking-tight text-white">Developer Options</h2>
+        <p className="mt-1 text-xs text-white/50">
+          Inspect the live raw event stream (last 50 events) captured from active windows, clipboard, and URLs.
+        </p>
+      </div>
+      <EventFeed />
+    </div>
+  )
+}
 
 function CaptureSection({
   workflow,
