@@ -205,5 +205,6 @@ export interface CloudStatus {
   userEmail: string | null
   userName: string | null
   userAvatar: string | null
+  mcpGatewayUrl?: string | null
 }
 
