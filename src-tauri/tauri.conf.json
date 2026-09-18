@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TaskFlow",
+  "version": "0.1.0",
+  "identifier": "com.taskflow.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "TaskFlow",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 640,
+        "decorations": false,
+        "transparent": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "resources": [
+      "../sidecar/main.py",
+      "../sidecar/basic_summarizer.py",
+      "../sidecar/context_builder.py",
+      "../sidecar/models.py",
+      "../sidecar/embedder.py",
+      "../sidecar/filter.py",
+      "../sidecar/llm_summarizer.py",
+      "../sidecar/summarizer.py",
+      "../sidecar/requirements.txt"
+    ]
+  }
+}

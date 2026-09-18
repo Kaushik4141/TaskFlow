@@ -1,0 +1,46 @@
+[package]
+name = "taskflow"
+version = "0.1.0"
+description = "Local-first work documentation tool"
+authors = ["TaskFlow"]
+edition = "2021"
+# The `detect_dryrun` helper binary makes a bare `cargo run` ambiguous, and
+# `tauri dev` shells out to exactly that. Pin the app as the default.
+default-run = "taskflow"
+
+[lib]
+name = "taskflow_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = [] }
+tauri-plugin-shell = "2.0"
+tauri-plugin-fs = "2.0"
+tauri-plugin-clipboard-manager = "2.0"
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-native-tls", "chrono"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+arboard = "3"
+url = "2"
+sha2 = "0.10"
+hex = "0.4"
+log = "0.4"
+regex = "1"
+objc2 = { version = "0.5", optional = true }
+objc2-app-kit = { version = "0.2", optional = true, features = ["NSRunningApplication", "NSWorkspace"] }
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winuser", "processthreadsapi", "psapi", "handleapi", "sysinfoapi"] }
+windows = { version = "0.52", features = ["Win32_UI_Accessibility", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_System_WinRT", "Foundation", "Media_Ocr", "Graphics_Imaging"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5"
+objc2-foundation = "0.2"
+objc2-app-kit = { version = "0.2", features = ["NSRunningApplication", "NSWorkspace"] }
