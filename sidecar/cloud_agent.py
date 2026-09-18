@@ -22,10 +22,34 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+def find_credentials() -> tuple[Optional[str], Optional[str]]:
+    """Resolve Supabase URL and Key from env or .env files."""
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
+    if not url or not key:
+        search_paths = [
+            Path(".env"),
+            Path("sidecar/.env"),
+            Path(__file__).parent / ".env",
+            Path(__file__).parent.parent / ".env",
+        ]
+        for env_path in search_paths:
+            if env_path.exists():
+                for line in env_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line.startswith("SUPABASE_URL="):
+                        url = url or line.split("=", 1)[1].strip().strip('"').strip("'")
+                    elif line.startswith("SUPABASE_KEY="):
+                        key = key or line.split("=", 1)[1].strip().strip('"').strip("'")
+    return url, key
 
 
 class CloudMemory:
@@ -36,8 +60,9 @@ class CloudMemory:
         supabase_url: Optional[str] = None,
         supabase_key: Optional[str] = None
     ) -> None:
-        self.url = (supabase_url or os.environ.get("SUPABASE_URL") or "").rstrip("/")
-        self.key = (supabase_key or os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_ANON_KEY") or "")
+        disc_url, disc_key = find_credentials()
+        self.url = (supabase_url or disc_url or "").rstrip("/")
+        self.key = (supabase_key or disc_key or "")
         
         if not self.url or not self.key:
             raise ValueError(

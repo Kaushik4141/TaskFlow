@@ -14,14 +14,18 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import http.server
 import json
 import os
+import queue
 import re
 import sqlite3
 import sys
+import threading
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 # Optional official MCP library import
 try:
@@ -118,6 +122,13 @@ def tool_query_graph_memory(
     """
     db_path = get_default_db_path()
     if not db_path.exists():
+        if SUPABASE_CLIENT_AVAILABLE and supabase_client.is_supabase_configured():
+            try:
+                import cloud_agent
+                cm = cloud_agent.CloudMemory()
+                return cm.query(query=query, project=project, time_bucket=time_bucket, limit=limit)
+            except Exception as e:
+                return {"error": f"Local database not found and Cloud Mirror query failed: {e}"}
         return {"error": f"TaskFlow SQLite database not found at {db_path}."}
 
     con = sqlite3.connect(str(db_path))
@@ -295,14 +306,18 @@ def tool_query_graph_memory(
 def tool_read_manifest() -> Dict[str, Any]:
     """Read the TaskFlow Graph Topology Manifest (manifest.json) for instant zero-hop routing."""
     tf_root = get_taskflow_root()
-    if not tf_root:
-        return {"error": "Obsidian vault path not configured."}
+    manifest_file = tf_root / "manifest.json" if tf_root else None
 
-    manifest_file = tf_root / "manifest.json"
-    if not manifest_file.exists():
-        # Fallback to index.md or auto-synthesize
+    if not manifest_file or not manifest_file.exists():
+        if SUPABASE_CLIENT_AVAILABLE and supabase_client.is_supabase_configured():
+            try:
+                import cloud_agent
+                cm = cloud_agent.CloudMemory()
+                return cm.get_manifest()
+            except Exception:
+                pass
         return {
-            "error": f"manifest.json not found in {tf_root}.",
+            "error": "manifest.json not found locally.",
             "suggestion": "Call query_graph_memory or list_projects instead."
         }
 
@@ -446,19 +461,25 @@ def tool_read_project(project_slug: str, max_lines: int = 50) -> Dict[str, Any]:
         max_lines: Maximum lines to read from the top (default 50) to protect agent context.
     """
     tf_root = get_taskflow_root()
-    if not tf_root:
-        return {"error": "Obsidian vault path not configured."}
-
-    proj_dir = tf_root / "Projects"
-    candidates = list(proj_dir.glob(f"{project_slug}.md")) if proj_dir.exists() else []
-    if not candidates and proj_dir.exists():
-        for f in proj_dir.glob("*.md"):
-            if f.stem.lower() == project_slug.lower():
-                candidates = [f]
-                break
+    candidates = []
+    if tf_root:
+        proj_dir = tf_root / "Projects"
+        candidates = list(proj_dir.glob(f"{project_slug}.md")) if proj_dir.exists() else []
+        if not candidates and proj_dir.exists():
+            for f in proj_dir.glob("*.md"):
+                if f.stem.lower() == project_slug.lower():
+                    candidates = [f]
+                    break
 
     if not candidates:
-        return {"error": f"Project '{project_slug}' not found in vault."}
+        if SUPABASE_CLIENT_AVAILABLE and supabase_client.is_supabase_configured():
+            try:
+                import cloud_agent
+                cm = cloud_agent.CloudMemory()
+                return cm.read_project(project_slug, max_lines=max_lines)
+            except Exception:
+                pass
+        return {"error": f"Project '{project_slug}' not found."}
 
     file_path = candidates[0]
     lines = file_path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -686,8 +707,64 @@ def dispatch_tool(name: str, args: Dict[str, Any]) -> Any:
 
 
 # =====================================================================
-# Pure Python JSON-RPC 2.0 Stdio MCP Protocol Engine
+# Pure Python JSON-RPC 2.0 Engine & SSE Server (Zero Dependencies)
 # =====================================================================
+
+def process_jsonrpc_request(req: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Process a single JSON-RPC 2.0 MCP request and return the response."""
+    req_id = req.get("id")
+    method = req.get("method", "")
+    params = req.get("params", {})
+
+    # Handle notifications (no id)
+    if req_id is None:
+        if method == "notifications/initialized":
+            sys.stderr.write("[TaskFlow MCP] Client connection initialized.\n")
+        return None
+
+    res: Dict[str, Any] = {"jsonrpc": "2.0", "id": req_id}
+
+    if method == "initialize":
+        res["result"] = {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {
+                "tools": {}
+            },
+            "serverInfo": {
+                "name": "taskflow-brain",
+                "version": "2.0.0"
+            }
+        }
+    elif method == "tools/list":
+        res["result"] = {"tools": MCP_TOOLS}
+    elif method == "tools/call":
+        tool_name = params.get("name", "")
+        tool_args = params.get("arguments", {})
+        try:
+            out = dispatch_tool(tool_name, tool_args)
+            text_out = out if isinstance(out, str) else json.dumps(out, indent=2)
+            res["result"] = {
+                "content": [
+                    {"type": "text", "text": text_out}
+                ]
+            }
+        except Exception as e:
+            res["result"] = {
+                "content": [
+                    {"type": "text", "text": f"Tool execution error: {e}"}
+                ],
+                "isError": True
+            }
+    elif method == "ping":
+        res["result"] = {}
+    else:
+        res["error"] = {
+            "code": -32601,
+            "message": f"Method '{method}' not found"
+        }
+
+    return res
+
 
 def run_pure_stdio_server() -> None:
     """Run standard Model Context Protocol (MCP 2024-11-05) over stdio.
@@ -709,59 +786,153 @@ def run_pure_stdio_server() -> None:
             sys.stderr.write(f"[TaskFlow MCP] JSON parse error: {e}\n")
             continue
 
-        req_id = req.get("id")
-        method = req.get("method", "")
-        params = req.get("params", {})
+        res = process_jsonrpc_request(req)
+        if res is not None:
+            sys.stdout.write(json.dumps(res) + "\n")
+            sys.stdout.flush()
 
-        # Handle notifications (no id)
-        if req_id is None:
-            if method == "notifications/initialized":
-                sys.stderr.write("[TaskFlow MCP] Client connection initialized.\n")
-            continue
 
-        res: Dict[str, Any] = {"jsonrpc": "2.0", "id": req_id}
+_SSE_SESSIONS: Dict[str, queue.Queue] = {}
+_SSE_LOCK = threading.Lock()
 
-        if method == "initialize":
-            res["result"] = {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": {}
-                },
-                "serverInfo": {
-                    "name": "taskflow-brain",
-                    "version": "2.0.0"
-                }
-            }
-        elif method == "tools/list":
-            res["result"] = {"tools": MCP_TOOLS}
-        elif method == "tools/call":
-            tool_name = params.get("name", "")
-            tool_args = params.get("arguments", {})
+
+class MCPHTTPHandler(http.server.BaseHTTPRequestHandler):
+    """Zero-dependency HTTP & SSE handler conforming to the Model Context Protocol."""
+
+    def log_message(self, format: str, *args: Any) -> None:
+        sys.stderr.write(f"[TaskFlow MCP Server] {self.address_string()} - {format % args}\n")
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "*")
+        self.end_headers()
+
+    def do_GET(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path in ("/sse", "/sse/"):
+            session_id = uuid.uuid4().hex
+            msg_queue: queue.Queue = queue.Queue()
+            with _SSE_LOCK:
+                _SSE_SESSIONS[session_id] = msg_queue
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+
+            endpoint_msg = f"event: endpoint\r\ndata: /messages?session_id={session_id}\r\n\r\n"
+            self.wfile.write(endpoint_msg.encode("utf-8"))
+            self.wfile.flush()
+
             try:
-                out = dispatch_tool(tool_name, tool_args)
-                text_out = out if isinstance(out, str) else json.dumps(out, indent=2)
-                res["result"] = {
-                    "content": [
-                        {"type": "text", "text": text_out}
-                    ]
-                }
-            except Exception as e:
-                res["result"] = {
-                    "content": [
-                        {"type": "text", "text": f"Tool execution error: {e}"}
-                    ],
-                    "isError": True
-                }
-        elif method == "ping":
-            res["result"] = {}
+                while True:
+                    try:
+                        data = msg_queue.get(timeout=25)
+                        if data is None:
+                            break
+                        chunk = f"event: message\r\ndata: {json.dumps(data)}\r\n\r\n"
+                        self.wfile.write(chunk.encode("utf-8"))
+                        self.wfile.flush()
+                    except queue.Empty:
+                        self.wfile.write(b": ping\r\n\r\n")
+                        self.wfile.flush()
+            except (ConnectionResetError, BrokenPipeError, Exception):
+                pass
+            finally:
+                with _SSE_LOCK:
+                    _SSE_SESSIONS.pop(session_id, None)
+        elif parsed.path in ("/", "/health"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "name": "taskflow-brain",
+                "version": "2.0.0",
+                "status": "ready",
+                "transport": "sse",
+                "sse_url": "/sse",
+                "messages_url": "/messages?session_id=<uuid>",
+                "jsonrpc_post_url": "/mcp",
+                "tools": [t["name"] for t in MCP_TOOLS]
+            }, indent=2).encode("utf-8"))
         else:
-            res["error"] = {
-                "code": -32601,
-                "message": f"Method '{method}' not found"
-            }
+            self.send_response(404)
+            self.end_headers()
 
-        sys.stdout.write(json.dumps(res) + "\n")
-        sys.stdout.flush()
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length).decode("utf-8") if content_length > 0 else "{}"
+
+        try:
+            req = json.loads(body)
+        except Exception as e:
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": f"Invalid JSON: {e}"}).encode("utf-8"))
+            return
+
+        # Direct JSON-RPC mode (/mcp, /rpc, or /)
+        if parsed.path in ("/mcp", "/rpc", "/"):
+            res = process_jsonrpc_request(req)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps(res or {}).encode("utf-8"))
+            return
+
+        # MCP SSE messages endpoint (/messages?session_id=...)
+        if parsed.path in ("/messages", "/messages/"):
+            query_params = parse_qs(parsed.query)
+            session_id = query_params.get("session_id", [""])[0]
+
+            with _SSE_LOCK:
+                target_queue = _SSE_SESSIONS.get(session_id)
+
+            if not target_queue:
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": f"Session '{session_id}' not found or expired"}).encode("utf-8"))
+                return
+
+            res = process_jsonrpc_request(req)
+            if res is not None:
+                target_queue.put(res)
+
+            self.send_response(202)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(b"Accepted")
+            return
+
+        self.send_response(404)
+        self.end_headers()
+
+
+def run_pure_sse_server(host: str, port: int) -> None:
+    """Run pure-Python multithreaded MCP SSE & HTTP server."""
+    server_address = (host, port)
+    httpd = http.server.ThreadingHTTPServer(server_address, MCPHTTPHandler)
+    sys.stderr.write(f"[TaskFlow MCP] Pure Python SSE server running on http://{host}:{port}/sse\n")
+    sys.stderr.write(f"[TaskFlow MCP] Direct JSON-RPC endpoint at http://{host}:{port}/mcp\n")
+    sys.stderr.write(f"[TaskFlow MCP] Server status & tools list at http://{host}:{port}/\n")
+    sys.stderr.flush()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        sys.stderr.write("[TaskFlow MCP] Shutting down SSE server...\n")
+        httpd.server_close()
 
 
 # =====================================================================
@@ -806,14 +977,15 @@ def main() -> None:
     sys.stderr.write(f"[TaskFlow MCP] SQLite DB: {db} (exists: {db.exists()})\n")
     sys.stderr.write(f"[TaskFlow MCP] Obsidian Vault: {vault}\n")
 
-    # If SSE is requested and official MCP package is available
-    if args.transport == "sse" and OFFICIAL_MCP_AVAILABLE:
-        server = MCPServer("taskflow-brain")
-        for tool in MCP_TOOLS:
-            # Register in MCPServer dynamically
-            name = tool["name"]
-            server.tool()(dispatch_tool)
-        server.run(transport="sse", host=args.host, port=args.port)
+    if args.transport == "sse":
+        if OFFICIAL_MCP_AVAILABLE:
+            server = MCPServer("taskflow-brain")
+            for tool in MCP_TOOLS:
+                name = tool["name"]
+                server.tool()(dispatch_tool)
+            server.run(transport="sse", host=args.host, port=args.port)
+        else:
+            run_pure_sse_server(args.host, args.port)
     else:
         # Default: Pure Python stdio engine (guaranteed zero-dependency compatibility)
         run_pure_stdio_server()
