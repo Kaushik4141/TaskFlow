@@ -9,7 +9,7 @@ export default function WindowControls({ className }: WindowControlsProps = {}) 
   const appWindow = getCurrentWindow()
 
   return (
-    <div className={className ?? "absolute right-0 top-0 z-[60] flex h-8 items-center justify-end"}>
+    <div data-tauri-drag-region className={className ?? "absolute right-0 top-0 z-[60] flex h-8 items-center justify-end"}>
       <button
         type="button"
         className="inline-flex h-full w-11 items-center justify-center text-white/50 transition-colors hover:bg-white/10 hover:text-white"

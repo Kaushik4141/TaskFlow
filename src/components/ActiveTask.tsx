@@ -113,7 +113,7 @@ export default function ActiveTask({ task }: { task: Task }) {
                 ) : (
                   <PlayIcon className="h-[18px] w-[18px]" />
                 )}
-                {isGenerating ? 'Generating...' : task.status === 'active' ? 'Stop Task' : 'Start Task'}
+                {isGenerating ? 'Generating...' : task.status === 'active' ? 'Stop TaskFlow' : 'Start TaskFlow'}
               </motion.button>
             </div>
             {isGenerating && (
