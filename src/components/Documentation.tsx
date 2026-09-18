@@ -90,12 +90,12 @@ export default function Documentation({ documentation }: { documentation: Docume
   }
 
   return (
-    <article className="h-full overflow-y-auto p-6">
+    <article className="h-full overflow-y-auto p-6 pt-16">
       <div className="mx-auto max-w-4xl space-y-5">
         {/* Header */}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-white/40">Documentation</p>
+            <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-white/40">Documentation</p>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <h2 className="text-2xl font-semibold tracking-tight text-white">Generated notes</h2>
               <span className="rounded-full border border-white/[0.08] bg-white/[0.02] px-2 py-0.5 text-xs font-medium text-white/50">
@@ -188,7 +188,7 @@ export default function Documentation({ documentation }: { documentation: Docume
               className="overflow-hidden"
             >
               <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-                <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/35">Version History</p>
+                <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-white/35">Version History</p>
                 <div className="max-h-56 space-y-1 overflow-y-auto">
                   {history.map((doc) => (
                     <button
@@ -225,7 +225,7 @@ export default function Documentation({ documentation }: { documentation: Docume
                   <BookOpenTextIcon className="h-4 w-4" />
                 </div>
                 <div className="min-w-0">
-                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-300/80">Summary</p>
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-brand-300/80">Summary</p>
                   <p className="text-sm leading-6 text-white/90">{selectedVersion.summary}</p>
                 </div>
               </div>
@@ -243,7 +243,7 @@ export default function Documentation({ documentation }: { documentation: Docume
               >
                 <div className="mb-3 flex items-center gap-2">
                   <BookOpenIcon className="h-4 w-4 text-brand-400" />
-                  <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-white/65">Key points</h3>
+                  <h3 className="text-sm font-semibold uppercase tracking-[0.1em] text-white/65">Key points</h3>
                 </div>
                 <ul className="space-y-2.5 text-sm text-white/80">
                   {keyPoints.map((point) => (
@@ -267,7 +267,7 @@ export default function Documentation({ documentation }: { documentation: Docume
                 <div className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <LinkIcon className="h-4 w-4 text-brand-400" />
-                    <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-white/65">Resources</h3>
+                    <h3 className="text-sm font-semibold uppercase tracking-[0.1em] text-white/65">Resources</h3>
                   </div>
                   <span className="text-[11px] font-mono text-white/40">
                     {resources.length} link{resources.length === 1 ? '' : 's'}
@@ -283,7 +283,7 @@ export default function Documentation({ documentation }: { documentation: Docume
             <motion.section variants={itemV} className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5">
               <div className="mb-4 flex items-center gap-2">
                 <ActivityIcon className="h-4 w-4 text-brand-400" />
-                <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-white/65">Activity timeline</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-[0.1em] text-white/65">Activity timeline</h3>
               </div>
               <ol className="relative space-y-3 border-l border-brand-500/20 pl-4">
                 {timeline.map((item, idx) => (

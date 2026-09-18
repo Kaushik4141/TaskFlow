@@ -17,7 +17,6 @@ import { motion } from './lib/motion'
 import { useViewSwap } from './lib/motion'
 import { startTaskStoreListeners, useTaskStore } from './stores/taskStore'
 import WindowControls from './components/WindowControls'
-import TaskFlowLogo from './components/TaskFlowLogo'
 
 export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(300)
@@ -215,8 +214,10 @@ export default function App() {
             
             {/* Sidebar Header */}
             <div className="relative z-10 flex flex-col gap-5 p-5 pt-7">
-              <div className="flex items-center gap-2.5">
-                <TaskFlowLogo size="md" />
+              <div className="flex items-center">
+                <span className="font-display text-[15px] font-semibold tracking-tight text-white select-none">
+                  TaskFlow
+                </span>
               </div>
               
               <div>

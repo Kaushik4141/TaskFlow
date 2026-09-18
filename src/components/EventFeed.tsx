@@ -169,7 +169,7 @@ function EventRow({ event }: { event: Event }) {
       >
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500/[0.08] text-brand-300 ring-1 ring-brand-500/10">
           {event.eventType === 'window_switch' && event.appName ? (
-            <span className="text-xs font-bold">{event.appName[0]?.toUpperCase()}</span>
+            <span className="text-xs font-semibold">{event.appName[0]?.toUpperCase()}</span>
           ) : (
             <Icon className="h-4 w-4" />
           )}

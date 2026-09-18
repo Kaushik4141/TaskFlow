@@ -99,7 +99,7 @@ export default function AppLogo({ appName, size = 'sm', className = '' }: AppLog
     return (
       <span
         title={appName}
-        className={`inline-flex shrink-0 items-center justify-center rounded-full bg-black ring-1 ring-white/20 text-emerald-400 font-mono font-bold shadow-sm ${sizeClasses} ${fontSizes} ${className}`}
+        className={`inline-flex shrink-0 items-center justify-center rounded-full bg-black ring-1 ring-white/20 text-emerald-400 font-mono font-semibold shadow-sm ${sizeClasses} ${fontSizes} ${className}`}
       >
         &gt;
       </span>
@@ -151,7 +151,7 @@ export default function AppLogo({ appName, size = 'sm', className = '' }: AppLog
   return (
     <span
       title={appName}
-      className={`inline-flex shrink-0 items-center justify-center rounded-full ring-1 font-bold shadow-sm ${sizeClasses} ${fontSizes} ${colorClass} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-full ring-1 font-semibold shadow-sm ${sizeClasses} ${fontSizes} ${colorClass} ${className}`}
     >
       {initial}
     </span>

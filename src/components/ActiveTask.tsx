@@ -77,7 +77,7 @@ export default function ActiveTask({ task }: { task: Task }) {
               transition={{ duration: 0.15 }}
               className="flex h-full flex-col overflow-y-auto"
             >
-              <header className="relative overflow-hidden border-b border-white/[0.06] p-6 shrink-0">
+              <header className="relative overflow-hidden border-b border-white/[0.06] p-6 pt-14 shrink-0">
                 {/* Header ambient glow when task is active */}
                 {task.status === 'active' && (
                   <div
@@ -88,7 +88,7 @@ export default function ActiveTask({ task }: { task: Task }) {
                 <div className="relative flex flex-wrap items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-white/40">{task.source}</span>
+                      <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-white/40">{task.source}</span>
                       {task.status === 'active' && (
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-200">
                           <span className="relative flex h-1.5 w-1.5">
@@ -189,7 +189,7 @@ function Metric({ label, value, accent }: { label: string; value: string; accent
         accent ? 'border-brand-500/30 bg-brand-500/[0.06]' : 'border-white/[0.06] bg-white/[0.015]'
       }`}
     >
-      <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/40">{label}</p>
+      <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-white/40">{label}</p>
       <p className={`mt-1 text-sm font-semibold capitalize ${accent ? 'text-brand-200' : 'text-white/85'}`}>{value}</p>
     </div>
   )

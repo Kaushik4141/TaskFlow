@@ -507,7 +507,7 @@ function CaptureSection({
       {/* Primary Group: Workspace */}
       <div className="space-y-3 pt-1">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-brand-300">Workspace</span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-brand-300">Workspace</span>
           <div className="h-px flex-1 bg-white/[0.06]" />
         </div>
 
@@ -1236,7 +1236,7 @@ function ProviderIcon({ provider, className }: { provider: Integration['provider
   if (provider === 'github') {
     return <GitBranchIcon className={className} />
   }
-  return <span className={`inline-flex items-center justify-center rounded bg-current/10 font-bold ${className}`}>{provider[0].toUpperCase()}</span>
+  return <span className={`inline-flex items-center justify-center rounded bg-current/10 font-semibold ${className}`}>{provider[0].toUpperCase()}</span>
 }
 
 function helpUrl(provider: Integration['provider']) {

@@ -55,7 +55,7 @@ export default function StatsPanel({ stats }: { stats: TaskStats | null }) {
               {/* Most Used Apps */}
               {stats.mostUsedApps.length > 0 && (
                 <div>
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/35">Top Apps</p>
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-white/35">Top Apps</p>
                   <div className="space-y-1.5">
                     {stats.mostUsedApps.slice(0, 5).map(([app, count], i) => (
                       <div key={app} className="flex items-center gap-2">
@@ -78,7 +78,7 @@ export default function StatsPanel({ stats }: { stats: TaskStats | null }) {
               {/* By Source */}
               {Object.keys(stats.tasksBySource).length > 0 && (
                 <div>
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/35">By Source</p>
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-white/35">By Source</p>
                   <div className="flex flex-wrap gap-2">
                     {Object.entries(stats.tasksBySource).map(([source, count]) => (
                       <motion.div

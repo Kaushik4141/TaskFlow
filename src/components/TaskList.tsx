@@ -103,7 +103,7 @@ export default function TaskList({ onSelectTimeline }: { onSelectTimeline?: () =
           <div>
             <div className="flex items-center gap-1.5 mb-0.5">
               <TaskFlowLogo size="xs" showWordmark={false} />
-              <p className="font-display text-[11px] font-medium uppercase tracking-[0.18em] text-white/50">TaskFlow</p>
+              <p className="font-display text-[11px] font-medium uppercase tracking-[0.1em] text-white/50">TaskFlow</p>
             </div>
             <h1 className="text-lg font-semibold tracking-tight text-white">Tasks</h1>
           </div>
@@ -212,7 +212,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
 function TaskGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <section className="mb-5">
-      <h2 className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/35">{label}</h2>
+      <h2 className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-white/35">{label}</h2>
       <div className="space-y-1.5">{children}</div>
     </section>
   )
@@ -225,7 +225,7 @@ function ProviderBadge({ provider }: { provider: Ticket['provider'] }) {
       : provider === 'github'
         ? 'bg-white/10 text-white/80'
         : 'bg-violet-400/15 text-violet-200'
-  return <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase ${className}`}>{provider}</span>
+  return <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase ${className}`}>{provider}</span>
 }
 
 export function TaskRow({ task, selected, eventCount, onClick }: { task: Task; selected: boolean; eventCount: number; onClick: () => void }) {

@@ -115,7 +115,7 @@ export default function Timeline({ taskId, onBack }: { taskId: string; onBack?: 
           ) : (
             <div className="flex items-center gap-1.5">
               <TaskFlowLogo size="xs" showWordmark={false} />
-              <p className="font-display text-[11px] font-medium uppercase tracking-[0.18em] text-white/50">TaskFlow</p>
+              <p className="font-display text-[11px] font-medium uppercase tracking-[0.1em] text-white/50">TaskFlow</p>
             </div>
           )}
 
@@ -309,13 +309,13 @@ function PiecesRollupCard({
           <CardDocIcon active={isSelected} />
           <h3
             className={`line-clamp-2 min-w-0 flex-1 text-xs font-semibold leading-snug transition-colors ${
-              isSelected ? 'text-white font-bold' : 'text-white/90 group-hover:text-white'
+              isSelected ? 'text-white font-semibold' : 'text-white/90 group-hover:text-white'
             }`}
           >
             {rollup.title}
           </h3>
           {isSelected && (
-            <span className="shrink-0 rounded-full bg-brand-400 px-1.5 py-0.2 text-[9px] font-bold text-black uppercase tracking-wider">
+            <span className="shrink-0 rounded-full bg-brand-400 px-1.5 py-0.2 text-[9px] font-semibold text-black uppercase tracking-wider">
               Viewing
             </span>
           )}

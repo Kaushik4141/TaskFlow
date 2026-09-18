@@ -2,6 +2,7 @@ import type { HTMLAttributes } from 'react'
 
 export interface TaskFlowLogoProps extends HTMLAttributes<HTMLDivElement> {
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
+  showIcon?: boolean
   showWordmark?: boolean
   fixedRed?: boolean
   iconClassName?: string
@@ -27,10 +28,11 @@ export function PulseWaveIcon({ className = 'h-full w-full' }: { className?: str
 /**
  * TaskFlow Logo:
  * Rounded-square brand icon containing a crisp white pulse-wave/activity glyph,
- * paired with the "TaskFlow" wordmark in warm off-white (--ink) using Studio Feixen Sans.
+ * paired with the "TaskFlow" wordmark in warm off-white (--ink) using Manrope.
  */
 export default function TaskFlowLogo({
   size = 'md',
+  showIcon = true,
   showWordmark = true,
   fixedRed = false,
   className = '',
@@ -56,19 +58,19 @@ export default function TaskFlowLogo({
       container: 'gap-2.5',
       icon: 'h-8 w-8 rounded-xl shadow-glow-sm', // 12px radius per tailwind.config.js
       svg: 'h-4.5 w-4.5 text-white',
-      text: 'text-[15px] font-bold tracking-tight',
+      text: 'text-[15px] font-semibold tracking-tight',
     },
     lg: {
       container: 'gap-3',
       icon: 'h-12 w-12 rounded-xl shadow-glow',
       svg: 'h-6 w-6 text-white',
-      text: 'text-xl font-bold tracking-tight',
+      text: 'text-xl font-semibold tracking-tight',
     },
     xl: {
       container: 'gap-4',
       icon: 'h-20 w-20 rounded-2xl shadow-glow',
       svg: 'h-10 w-10 text-white',
-      text: 'text-3xl font-bold tracking-tight',
+      text: 'text-3xl font-semibold tracking-tight',
     },
   }[size]
 
@@ -77,15 +79,17 @@ export default function TaskFlowLogo({
     : 'bg-gradient-to-br from-brand-500 to-brand-600'
 
   return (
-    <div className={`inline-flex items-center ${dimensions.container} ${className}`} {...props}>
+    <div className={`inline-flex items-center ${showIcon && showWordmark ? dimensions.container : ''} ${className}`} {...props}>
       {/* Rounded-square icon container with white pulse-wave glyph */}
-      <div
-        className={`relative flex shrink-0 items-center justify-center ${dimensions.icon} ${bgStyle} ${iconClassName}`}
-      >
-        <PulseWaveIcon className={dimensions.svg} />
-      </div>
+      {showIcon && (
+        <div
+          className={`relative flex shrink-0 items-center justify-center ${dimensions.icon} ${bgStyle} ${iconClassName}`}
+        >
+          <PulseWaveIcon className={dimensions.svg} />
+        </div>
+      )}
 
-      {/* TaskFlow wordmark in warm off-white (--ink) with Studio Feixen Sans display font */}
+      {/* TaskFlow wordmark in warm off-white (--ink) with Manrope display font */}
       {showWordmark && (
         <span
           className={`font-display text-ink select-none ${dimensions.text} ${wordmarkClassName}`}

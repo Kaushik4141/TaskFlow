@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   ActivityIcon,
@@ -7,7 +7,9 @@ import {
   ChevronRightIcon,
   ClipboardIcon,
   DownloadIcon,
+  EllipsisIcon,
   ExternalLinkIcon,
+  InfoIcon,
   LayersIcon,
   SparklesIcon,
 } from '@animateicons/react/lucide'
@@ -46,6 +48,8 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
   const [copied, setCopied] = useState(false)
   const [exported, setExported] = useState(false)
   const [activeTab, setActiveTab] = useState<'summary' | 'activity'>('summary')
+  const [overflowOpen, setOverflowOpen] = useState(false)
+  const overflowRef = useRef<HTMLDivElement>(null)
 
   // Sorted list of rollups for this task to compute prev/next
   const taskRollups = useMemo(
@@ -65,6 +69,21 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
   const apps = useMemo(() => parseJsonArray(rollup.apps), [rollup.apps])
   const resources = useMemo(() => parseJsonArray(rollup.resources), [rollup.resources])
   const workstream = rollup.workstreamSlug ?? 'Inbox'
+
+  // Parse summaryMd into structured sections for visual hierarchy
+  const parsedSummary = useMemo(() => parseSummaryMd(rollup.summaryMd), [rollup.summaryMd])
+
+  // Merge key points: prefer dedicated JSON field, supplement with parsed markdown ones
+  const mergedKeyPoints = useMemo(() => {
+    const noiseLines = new Set([
+      'Local events were captured successfully.',
+      'AI summarization was unavailable; showing a local summary of captured events.',
+    ])
+    const fromJson = keyPoints.filter((kp) => !noiseLines.has(kp))
+    if (fromJson.length > 0) return fromJson
+    // Fall back to parsed markdown key points if JSON field was empty
+    return parsedSummary.keyPoints.filter((kp) => !noiseLines.has(kp))
+  }, [keyPoints, parsedSummary.keyPoints])
 
   // Time formatting
   const { timeRange, relativeTime, durationStr } = useMemo(() => {
@@ -129,6 +148,27 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onBack, prevRollup, nextRollup, setSelectedRollupId])
 
+  // Close overflow menu on outside click or Escape
+  useEffect(() => {
+    if (!overflowOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (overflowRef.current && !overflowRef.current.contains(e.target as Node)) {
+        setOverflowOpen(false)
+      }
+    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOverflowOpen(false)
+      }
+    }
+    window.addEventListener('mousedown', handleClickOutside)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('mousedown', handleClickOutside)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [overflowOpen])
+
   // Copy full Markdown representation
   const handleCopyMarkdown = async () => {
     const mdLines = [
@@ -181,8 +221,8 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
       transition={{ duration: 0.18, ease: 'easeOut' }}
       className="flex h-full flex-col overflow-y-auto"
     >
-      {/* Top Navigation & Breadcrumbs Bar */}
-      <div className="sticky top-0 z-30 flex items-center justify-between border-b border-white/[0.06] bg-noir-950/90 px-6 py-3 backdrop-blur-md">
+      {/* Top Navigation & Breadcrumbs Bar — offset below app header (Row 1 + Row 2 ≈ 68px) */}
+      <div className="sticky top-0 z-20 flex items-center justify-between border-b border-white/[0.06] bg-noir-950/90 px-6 py-3 pt-[72px] backdrop-blur-md">
         <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"
@@ -236,23 +276,62 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
             </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => void handleCopyMarkdown()}
-            className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-white/70 transition-colors hover:border-white/20 hover:bg-white/[0.08] hover:text-white"
-          >
-            {copied ? <CheckIcon className="h-3.5 w-3.5 text-emerald-400" /> : <ClipboardIcon className="h-3.5 w-3.5" />}
-            <span>{copied ? 'Copied' : 'Copy'}</span>
-          </button>
+          {/* Overflow menu for Copy & Export .md */}
+          <div className="relative" ref={overflowRef}>
+            <button
+              type="button"
+              aria-label="More actions"
+              aria-haspopup="menu"
+              aria-expanded={overflowOpen}
+              title="More actions"
+              onClick={() => setOverflowOpen((prev) => !prev)}
+              className={`flex items-center justify-center rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
+                overflowOpen
+                  ? 'border-brand-500/40 bg-brand-500/15 text-white ring-1 ring-brand-500/30'
+                  : 'border-white/10 bg-white/[0.03] text-white/70 hover:border-white/20 hover:bg-white/[0.08] hover:text-white'
+              }`}
+            >
+              <EllipsisIcon className="h-3.5 w-3.5" />
+            </button>
 
-          <button
-            type="button"
-            onClick={handleExportMarkdown}
-            className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-white/70 transition-colors hover:border-white/20 hover:bg-white/[0.08] hover:text-white"
-          >
-            {exported ? <CheckIcon className="h-3.5 w-3.5 text-emerald-400" /> : <DownloadIcon className="h-3.5 w-3.5" />}
-            <span>{exported ? 'Exported' : 'Export .md'}</span>
-          </button>
+            <AnimatePresence>
+              {overflowOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 4 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 4 }}
+                  transition={{ duration: 0.15 }}
+                  role="menu"
+                  className="absolute right-0 top-full mt-2 w-44 rounded-xl border border-white/10 bg-noir-900/95 p-1.5 shadow-elevated backdrop-blur-md z-40"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      void handleCopyMarkdown()
+                      setOverflowOpen(false)
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-white/85 hover:bg-white/[0.08] hover:text-white transition-colors"
+                  >
+                    {copied ? <CheckIcon className="h-3.5 w-3.5 text-emerald-400" /> : <ClipboardIcon className="h-3.5 w-3.5 text-white/60" />}
+                    <span>{copied ? 'Copied' : 'Copy Markdown'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      handleExportMarkdown()
+                      setOverflowOpen(false)
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-white/85 hover:bg-white/[0.08] hover:text-white transition-colors"
+                  >
+                    {exported ? <CheckIcon className="h-3.5 w-3.5 text-emerald-400" /> : <DownloadIcon className="h-3.5 w-3.5 text-white/60" />}
+                    <span>{exported ? 'Exported' : 'Export .md'}</span>
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 
@@ -276,7 +355,7 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
                 </span>
               </div>
 
-              <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl leading-snug">
+              <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl leading-snug">
                 {rollup.title}
               </h1>
             </div>
@@ -333,27 +412,75 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
 
         {activeTab === 'summary' ? (
           <div className="space-y-6">
-            {/* Main Screen Summary */}
-            <div className="rounded-2xl border border-white/[0.08] bg-black/40 p-6 shadow-md">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.12em] text-white/70">
-                  <SparklesIcon className="h-4 w-4 text-brand-400" />
-                  <span>Event Summary</span>
-                </h2>
+            {/* Description & AI-notice badge */}
+            {(parsedSummary.description || parsedSummary.isLocalFallback) && (
+              <div className="rounded-2xl border border-white/[0.08] bg-black/40 p-6 shadow-md">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.1em] text-white/70">
+                    <SparklesIcon className="h-4 w-4 text-brand-400" />
+                    <span>Event Summary</span>
+                  </h2>
+                  {parsedSummary.isLocalFallback && (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-medium text-amber-300/80">
+                      <InfoIcon className="h-3 w-3" />
+                      Local summary — AI unavailable
+                    </span>
+                  )}
+                </div>
+                {parsedSummary.description && (
+                  <p className="text-sm leading-relaxed text-white/50">{parsedSummary.description}</p>
+                )}
+                {parsedSummary.summaryText && (
+                  <div className="mt-3 prose prose-invert prose-neutral max-w-none text-white/80 leading-relaxed text-sm">
+                    <ReactMarkdown>{parsedSummary.summaryText}</ReactMarkdown>
+                  </div>
+                )}
               </div>
-              <div className="prose prose-invert prose-neutral max-w-none text-white/80 leading-relaxed text-sm">
-                <ReactMarkdown>{rollup.summaryMd}</ReactMarkdown>
+            )}
+
+            {/* Parsed Activity Timeline from summaryMd (fallback summaries) */}
+            {parsedSummary.activityLines.length > 0 && (
+              <div className="rounded-2xl border border-white/[0.08] bg-black/40 p-6 shadow-md">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.1em] text-white/60">
+                    <ActivityIcon className="h-3.5 w-3.5 text-white/40" />
+                    <span>Activity Timeline</span>
+                  </h3>
+                  <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-[10px] font-medium text-white/50 tabular-nums">
+                    {parsedSummary.activityLines.length} events
+                  </span>
+                </div>
+                <div className="divide-y divide-white/[0.04]">
+                  {parsedSummary.activityLines.map((line, idx) => (
+                    <SummaryActivityRow key={idx} line={line} />
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* AI-generated narrative (non-fallback summaries with no structured sections) */}
+            {!parsedSummary.isLocalFallback && !parsedSummary.description && parsedSummary.otherContent && (
+              <div className="rounded-2xl border border-white/[0.08] bg-black/40 p-6 shadow-md">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.1em] text-white/70">
+                    <SparklesIcon className="h-4 w-4 text-brand-400" />
+                    <span>Event Summary</span>
+                  </h2>
+                </div>
+                <div className="prose prose-invert prose-neutral max-w-none text-white/80 leading-relaxed text-sm">
+                  <ReactMarkdown>{parsedSummary.otherContent}</ReactMarkdown>
+                </div>
+              </div>
+            )}
 
             {/* Key Highlights / Points */}
-            {keyPoints.length > 0 && (
+            {mergedKeyPoints.length > 0 && (
               <div className="rounded-2xl border border-white/[0.08] bg-black/40 p-6 shadow-md">
-                <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-white/60">
+                <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.1em] text-white/60">
                   Key Takeaways
                 </h3>
                 <ul className="space-y-2.5">
-                  {keyPoints.map((point, idx) => (
+                  {mergedKeyPoints.map((point, idx) => (
                     <li key={idx} className="flex items-start gap-2.5 text-xs leading-relaxed text-white/75">
                       <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-400" />
                       <span>{point}</span>
@@ -367,7 +494,7 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               {/* Applications & Tools Used */}
               <div className="rounded-2xl border border-white/[0.08] bg-black/40 p-5 shadow-md">
-                <h3 className="mb-3.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-white/60">
+                <h3 className="mb-3.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.1em] text-white/60">
                   <LayersIcon className="h-3.5 w-3.5 text-white/40" />
                   <span>Applications & Windows</span>
                 </h3>
@@ -390,7 +517,7 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
 
               {/* Resources & Links */}
               <div className="rounded-2xl border border-white/[0.08] bg-black/40 p-5 shadow-md">
-                <h3 className="mb-3.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-white/60">
+                <h3 className="mb-3.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.1em] text-white/60">
                   <ExternalLinkIcon className="h-3.5 w-3.5 text-white/40" />
                   <span>Referenced Resources</span>
                 </h3>
@@ -569,4 +696,196 @@ function triggerLabel(trigger: Rollup['triggerKind'] & string): string {
     default:
       return trigger
   }
+}
+
+// ---------- Structured summary parsing ----------
+
+interface ActivityLine {
+  appName: string
+  timestamp: string
+  detail: string
+}
+
+interface ParsedSummary {
+  /** Prose description text (before first ## heading), stripped of redundant # title */
+  description: string
+  /** Content of the "## Summary" section */
+  summaryText: string
+  /** Parsed "## Activity Timeline" entries */
+  activityLines: ActivityLine[]
+  /** Parsed "## Key Points" bullet items */
+  keyPoints: string[]
+  /** Whether this is a local fallback summary (AI unavailable) */
+  isLocalFallback: boolean
+  /** Any remaining markdown not matching known sections */
+  otherContent: string
+}
+
+const FALLBACK_MARKERS = [
+  'AI summarization was unavailable',
+  'AI documentation was not available',
+  'TaskFlow generated a structured local event summary',
+]
+
+/**
+ * Parse `rollup.summaryMd` into structured sections.
+ *
+ * Fallback summaries from `commands.rs::fallback_summary()` follow a rigid
+ * `# Title / **Description:** / ## Summary / ## Activity Timeline / ## Key Points / ## Resources Referenced`
+ * structure. AI-generated summaries have free-form narrative. The parser
+ * handles both gracefully.
+ */
+function parseSummaryMd(md: string): ParsedSummary {
+  const result: ParsedSummary = {
+    description: '',
+    summaryText: '',
+    activityLines: [],
+    keyPoints: [],
+    isLocalFallback: false,
+    otherContent: '',
+  }
+
+  if (!md || md.trim().length === 0) return result
+
+  // Detect fallback
+  result.isLocalFallback = FALLBACK_MARKERS.some((marker) => md.includes(marker))
+
+  // Split into sections by ## headings
+  const sectionRegex = /^## (.+)$/gm
+  const sections: { heading: string; body: string }[] = []
+  let preamble = ''
+  let lastIdx = 0
+  let lastHeading = ''
+
+  // Find all ## headings
+  let match: RegExpExecArray | null
+  while ((match = sectionRegex.exec(md)) !== null) {
+    const chunk = md.slice(lastIdx, match.index).trim()
+    if (lastIdx === 0) {
+      preamble = chunk
+    } else {
+      sections.push({ heading: lastHeading, body: chunk })
+    }
+    lastHeading = match[1].trim()
+    lastIdx = match.index + match[0].length
+  }
+  // Last section
+  if (lastHeading) {
+    sections.push({ heading: lastHeading, body: md.slice(lastIdx).trim() })
+  } else {
+    // No ## headings at all — this is a pure narrative AI summary
+    result.otherContent = md.trim()
+    return result
+  }
+
+  // Parse preamble: strip "# Title" line and extract description prose
+  if (preamble) {
+    const lines = preamble.split('\n').filter((l) => l.trim().length > 0)
+    const descLines: string[] = []
+    for (const line of lines) {
+      // Skip redundant "# Title" header (already in the banner)
+      if (/^#\s+/.test(line)) continue
+      // Extract description/event count as description text
+      const cleaned = line.replace(/^\*\*Description:\*\*\s*/, '').replace(/^\*\*Events captured:\*\*\s*\d+$/, '').trim()
+      if (cleaned) descLines.push(cleaned)
+    }
+    result.description = descLines.join(' ').trim()
+  }
+
+  // Process each section
+  const otherParts: string[] = []
+
+  for (const section of sections) {
+    const headingLower = section.heading.toLowerCase()
+
+    if (headingLower === 'summary') {
+      // Strip the fallback notice from the displayed summary text
+      const cleanedLines = section.body
+        .split('\n')
+        .filter((line) => !FALLBACK_MARKERS.some((m) => line.includes(m)))
+        .join('\n')
+        .trim()
+      result.summaryText = cleanedLines
+    } else if (headingLower === 'activity timeline') {
+      // Parse each "- **appName** `timestamp`: detail" line
+      const lines = section.body.split('\n').filter((l) => l.trim().startsWith('-'))
+      for (const line of lines) {
+        const parsed = parseActivityLine(line)
+        if (parsed) result.activityLines.push(parsed)
+      }
+    } else if (headingLower === 'key points') {
+      const items = section.body
+        .split('\n')
+        .filter((l) => l.trim().startsWith('-'))
+        .map((l) => l.replace(/^-\s*/, '').trim())
+        .filter((l) => l.length > 0)
+      result.keyPoints = items
+    } else if (headingLower === 'resources referenced') {
+      // Resources are handled by the dedicated `resources` JSON field + existing card — skip
+    } else {
+      // Unknown section — include in otherContent
+      otherParts.push(`## ${section.heading}\n${section.body}`)
+    }
+  }
+
+  if (otherParts.length > 0) {
+    result.otherContent = otherParts.join('\n\n').trim()
+  }
+
+  return result
+}
+
+/**
+ * Parse a single activity line from the fallback summary format:
+ * `- **appName** \`timestamp\`: detail text`
+ */
+function parseActivityLine(line: string): ActivityLine | null {
+  const trimmed = line.replace(/^-\s*/, '').trim()
+  // Match: **appName** `timestamp`: detail
+  const m = trimmed.match(/^\*\*(.+?)\*\*\s*`(.+?)`:\s*(.*)$/)
+  if (m) {
+    return {
+      appName: m[1].trim(),
+      timestamp: m[2].trim(),
+      detail: m[3].trim(),
+    }
+  }
+  // Fallback: treat the whole line as detail with unknown app
+  if (trimmed.length > 0) {
+    return {
+      appName: 'Unknown',
+      timestamp: '',
+      detail: trimmed,
+    }
+  }
+  return null
+}
+
+/**
+ * Renders a single activity entry from the parsed summaryMd Activity Timeline,
+ * styled consistently with `RawEventRow` (AppLogo, time, detail).
+ */
+function SummaryActivityRow({ line }: { line: ActivityLine }) {
+  const timeStr = useMemo(() => {
+    if (!line.timestamp) return ''
+    try {
+      return format(parseISO(line.timestamp), 'HH:mm:ss')
+    } catch {
+      return line.timestamp
+    }
+  }, [line.timestamp])
+
+  return (
+    <div className="py-2.5 text-xs transition-colors hover:bg-white/[0.015]">
+      <div className="flex items-center gap-2.5 min-w-0">
+        {timeStr && (
+          <span className="font-mono text-[11px] text-white/35 tabular-nums shrink-0">{timeStr}</span>
+        )}
+        <AppLogo appName={line.appName} size="sm" />
+        <span className="font-medium text-white/80 shrink-0">{line.appName}</span>
+        <span className="text-white/20 shrink-0">·</span>
+        <span className="truncate text-white/60">{line.detail || '(No detail)'}</span>
+      </div>
+    </div>
+  )
 }
