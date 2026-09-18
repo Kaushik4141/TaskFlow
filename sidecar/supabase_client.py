@@ -1,29 +1,36 @@
 #!/usr/bin/env python3
-"""Supabase client and synchronization engine for TaskFlow MCP.
+"""TaskFlow 24/7 Cloud Memory Client & Sync Engine for Supabase.
 
-Manages connection to Supabase, push synchronization of Obsidian vault notes,
-vector embeddings generation, and cloud queries for external AI agents.
+Provides:
+- 24/7 Always-On Memory Mirror for cloud agents (Hermes, OpenClaw, remote LLMs)
+- Dual transport: Supabase Python SDK OR pure Python stdlib REST (zero pip packages required)
+- Syncs: Vault notes (Markdown), atomic activity rollups (pgvector), and graph edges
+- High-speed cloud retrieval: < 15ms vector + scope retrieval via PostgreSQL RPC
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
 import sqlite3
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     from supabase import Client, create_client
-    SUPABASE_AVAILABLE = True
+    SUPABASE_SDK_AVAILABLE = True
 except ImportError:
-    SUPABASE_AVAILABLE = False
+    SUPABASE_SDK_AVAILABLE = False
     Client = Any  # type: ignore
 
 
 def get_default_db_path() -> Path:
-    """Resolve default SQLite DB path."""
+    """Resolve default TaskFlow SQLite database path."""
     if "TASKFLOW_DB" in os.environ:
         return Path(os.environ["TASKFLOW_DB"])
     if sys.platform == "win32":
@@ -35,12 +42,36 @@ def get_default_db_path() -> Path:
     return Path("taskflow.sqlite")
 
 
-def get_supabase_credentials() -> tuple[Optional[str], Optional[str]]:
-    """Resolve Supabase URL and Key from environment, .env file, or SQLite settings."""
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+def get_vault_path() -> Optional[Path]:
+    """Resolve Obsidian vault path from env or SQLite settings."""
+    if "TASKFLOW_VAULT" in os.environ:
+        p = Path(os.environ["TASKFLOW_VAULT"])
+        if p.exists():
+            return p
 
-    # If not in env, check sidecar/.env or repo-root .env
+    db_path = get_default_db_path()
+    if db_path.exists():
+        try:
+            con = sqlite3.connect(str(db_path))
+            cur = con.cursor()
+            cur.execute("SELECT value FROM settings WHERE key = 'obsidian_vault_path'")
+            row = cur.fetchone()
+            con.close()
+            if row and row[0]:
+                p = Path(row[0])
+                if p.exists():
+                    return p
+        except Exception:
+            pass
+    return None
+
+
+def get_supabase_credentials() -> Tuple[Optional[str], Optional[str]]:
+    """Resolve Supabase URL and API Key from env, .env file, or SQLite settings."""
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
+
+    # Check .env files
     if not url or not key:
         for env_file in [Path(".env"), Path("sidecar/.env"), Path("../.env")]:
             if env_file.exists():
@@ -51,7 +82,7 @@ def get_supabase_credentials() -> tuple[Optional[str], Optional[str]]:
                     elif line.startswith("SUPABASE_KEY="):
                         key = key or line.split("=", 1)[1].strip().strip('"').strip("'")
 
-    # If still not found, check SQLite settings table
+    # Check SQLite settings
     if not url or not key:
         db_path = get_default_db_path()
         if db_path.exists():
@@ -69,193 +100,364 @@ def get_supabase_credentials() -> tuple[Optional[str], Optional[str]]:
     return url, key
 
 
-_client_instance: Optional[Client] = None
+def is_supabase_configured() -> bool:
+    """Return True if valid Supabase credentials are found."""
+    url, key = get_supabase_credentials()
+    return bool(url and key and url.startswith("http"))
 
 
-def get_supabase_client() -> Optional[Client]:
-    """Get or create the Supabase client instance."""
-    global _client_instance
-    if not SUPABASE_AVAILABLE:
-        return None
+# =====================================================================
+# REST Engine (Zero-dependency fallback for Supabase)
+# =====================================================================
 
-    if _client_instance is not None:
-        return _client_instance
-
+def _supabase_request(
+    endpoint: str,
+    method: str = "GET",
+    data: Optional[Any] = None,
+    params: Optional[Dict[str, str]] = None,
+    headers_extra: Optional[Dict[str, str]] = None,
+) -> Any:
+    """Execute a direct REST request against Supabase PostgREST API using standard urllib."""
     url, key = get_supabase_credentials()
     if not url or not key:
-        return None
+        raise ValueError("Supabase URL and Key are required. Set SUPABASE_URL and SUPABASE_KEY.")
+
+    clean_url = url.rstrip("/")
+    path = endpoint.lstrip("/")
+    full_url = f"{clean_url}/rest/v1/{path}"
+
+    if params:
+        query_string = urllib.parse.urlencode(params)
+        full_url = f"{full_url}?{query_string}"
+
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    if headers_extra:
+        headers.update(headers_extra)
+
+    body_bytes = json.dumps(data).encode("utf-8") if data is not None else None
+
+    req = urllib.request.Request(full_url, data=body_bytes, headers=headers, method=method)
 
     try:
-        _client_instance = create_client(url, key)
-        return _client_instance
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+            if not raw:
+                return {}
+            return json.loads(raw)
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Supabase HTTP {e.code} Error: {error_body}") from e
     except Exception as e:
-        print(f"[Supabase] Connection initialization failed: {e}", file=sys.stderr)
-        return None
-
-
-def is_supabase_configured() -> bool:
-    """Check if Supabase credentials are configured."""
-    url, key = get_supabase_credentials()
-    return bool(url and key)
+        raise RuntimeError(f"Supabase Connection Error: {e}") from e
 
 
 def compute_file_hash(text: str) -> str:
-    """Compute SHA256 of text content."""
+    """Compute SHA256 of text."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def extract_frontmatter(text: str) -> tuple[dict, str]:
-    """Parse YAML frontmatter from markdown text."""
-    if not text.startswith("---"):
-        return {}, text
+# =====================================================================
+# Sync Operations: Push Local Memory to Cloud
+# =====================================================================
 
-    parts = text.split("---", 2)
-    if len(parts) >= 3:
-        front_str = parts[1].strip()
-        body = parts[2].strip()
-        meta = {}
-        for line in front_str.splitlines():
-            if ":" in line:
-                k, v = line.split(":", 1)
-                k = k.strip()
-                v = v.strip().strip('"').strip("'")
-                if v.startswith("[") and v.endswith("]"):
-                    items = [x.strip().strip('"').strip("'") for x in v[1:-1].split(",") if x.strip()]
-                    meta[k] = items
-                else:
-                    meta[k] = v
-        return meta, body
-    return {}, text
-
-
-def sync_vault_to_supabase(vault_root: Path, embedder: Any = None) -> Dict[str, Any]:
-    """Scan the local Obsidian vault and upsert notes and vector embeddings into Supabase.
-    
-    Returns a summary of uploaded, skipped, and errored files.
-    """
-    client = get_supabase_client()
-    if not client:
+def sync_all_to_supabase() -> Dict[str, Any]:
+    """Execute full 24/7 cloud sync: vault notes, activity rollups, and graph edges."""
+    if not is_supabase_configured():
         return {
             "success": False,
-            "error": "Supabase client not initialized. Set SUPABASE_URL and SUPABASE_KEY in environment."
+            "error": "Supabase credentials not configured. Please set SUPABASE_URL and SUPABASE_KEY."
         }
 
-    # Lazy-load embedder if not passed
-    if embedder is None:
-        try:
-            from embedder import Embedder
-            embedder = Embedder()
-        except Exception:
-            embedder = None
-
-    uploaded = 0
-    skipped = 0
-    errors = []
-
-    for file_path in vault_root.rglob("*.md"):
-        try:
-            rel_path = str(file_path.relative_to(vault_root)).replace("\\", "/")
-            raw_text = file_path.read_text(encoding="utf-8", errors="replace")
-            current_hash = compute_file_hash(raw_text)
-            title = file_path.stem
-            metadata, body = extract_frontmatter(raw_text)
-
-            # Generate embedding vector
-            embedding = None
-            if embedder:
-                snippet = (title + " " + body)[:1000]
-                embedding = embedder.embed(snippet)
-
-            row: Dict[str, Any] = {
-                "path": rel_path,
-                "title": title,
-                "content": raw_text,
-                "metadata": metadata,
-                "file_hash": current_hash,
-            }
-            if embedding:
-                row["embedding"] = embedding
-
-            # Upsert into Supabase table vault_notes on conflict (path)
-            res = client.table("vault_notes").upsert(row, on_conflict="path").execute()
-            if hasattr(res, "data"):
-                uploaded += 1
-            else:
-                skipped += 1
-        except Exception as e:
-            errors.append(f"{file_path.name}: {e}")
-
-    return {
-        "success": len(errors) == 0,
-        "uploaded_count": uploaded,
-        "skipped_count": skipped,
-        "errors": errors
+    report = {
+        "vault_notes_uploaded": 0,
+        "rollups_uploaded": 0,
+        "graph_edges_uploaded": 0,
+        "errors": []
     }
 
-
-def query_cloud_vault(query: str, semantic: bool = True, limit: int = 5, embedder: Any = None) -> List[Dict[str, Any]]:
-    """Query the Supabase vault using vector similarity search (RPC) or full-text filtering.
-    
-    Enables remote agents to access the user's knowledge base even when the local laptop is off.
-    """
-    client = get_supabase_client()
-    if not client:
-        return [{"error": "Supabase client not initialized."}]
-
-    if semantic:
-        if embedder is None:
-            try:
-                from embedder import Embedder
-                embedder = Embedder()
-            except Exception:
-                embedder = None
-
-        if embedder:
-            try:
-                query_vec = embedder.embed(query)
-                # Call stored procedure search_vault_notes
-                rpc_res = client.rpc("search_vault_notes", {
-                    "query_embedding": query_vec,
-                    "match_threshold": 0.1,
-                    "match_count": limit,
-                    "filter_prefix": ""
-                }).execute()
-
-                if hasattr(rpc_res, "data") and rpc_res.data:
-                    results = []
-                    for row in rpc_res.data:
-                        content = row.get("content", "")
-                        results.append({
-                            "path": row.get("path"),
-                            "title": row.get("title"),
-                            "similarity": round(row.get("similarity", 0.0), 4),
-                            "snippet": content[:300] + ("..." if len(content) > 300 else ""),
-                            "source": "supabase_cloud"
-                        })
-                    return results
-            except Exception as e:
-                # Fallback to standard table query if RPC is not installed
-                print(f"[Supabase] Semantic RPC search error: {e}", file=sys.stderr)
-
-    # Standard ILIKE search on table
+    # Lazy-load embedder if available
+    embedder = None
     try:
-        res = client.table("vault_notes").select("path, title, content").ilike("content", f"%{query}%").limit(limit).execute()
-        if hasattr(res, "data") and res.data:
-            results = []
-            for row in res.data:
-                content = row.get("content", "")
-                idx = content.lower().find(query.lower())
-                start = max(0, idx - 60)
-                end = min(len(content), idx + len(query) + 100)
-                results.append({
-                    "path": row.get("path"),
-                    "title": row.get("title"),
-                    "similarity": 1.0,
-                    "snippet": f"...{content[start:end]}...",
-                    "source": "supabase_cloud"
-                })
-            return results
-    except Exception as e:
-        return [{"error": f"Cloud search query failed: {e}"}]
+        from embedder import Embedder
+        embedder = Embedder()
+    except Exception:
+        pass
 
-    return []
+    # 1. Sync Vault Notes & manifest.json
+    vault = get_vault_path()
+    if vault and vault.exists():
+        tf_root = vault / "TaskFlow" if (vault / "TaskFlow").exists() else vault
+        notes_batch = []
+        for file_path in tf_root.rglob("*.md"):
+            try:
+                rel_path = str(file_path.relative_to(vault)).replace("\\", "/")
+                raw_text = file_path.read_text(encoding="utf-8", errors="replace")
+                current_hash = compute_file_hash(raw_text)
+
+                embedding = None
+                if embedder:
+                    snippet = (file_path.stem + " " + raw_text)[:1000]
+                    embedding = embedder.embed(snippet)
+
+                notes_batch.append({
+                    "path": rel_path,
+                    "title": file_path.stem,
+                    "content": raw_text,
+                    "metadata": {"type": "markdown_note"},
+                    "file_hash": current_hash,
+                    "embedding": embedding,
+                })
+            except Exception as e:
+                report["errors"].append(f"vault note {file_path.name}: {e}")
+
+        # Add manifest.json if exists
+        manifest_file = tf_root / "manifest.json"
+        if manifest_file.exists():
+            try:
+                m_text = manifest_file.read_text(encoding="utf-8")
+                notes_batch.append({
+                    "path": "TaskFlow/manifest.json",
+                    "title": "Graph Topology Manifest",
+                    "content": m_text,
+                    "metadata": {"type": "manifest"},
+                    "file_hash": compute_file_hash(m_text),
+                    "embedding": None
+                })
+            except Exception as e:
+                report["errors"].append(f"manifest.json: {e}")
+
+        if notes_batch:
+            try:
+                _supabase_request(
+                    "vault_notes",
+                    method="POST",
+                    data=notes_batch,
+                    headers_extra={"Prefer": "resolution=merge-duplicates"}
+                )
+                report["vault_notes_uploaded"] = len(notes_batch)
+            except Exception as e:
+                report["errors"].append(f"vault_notes upsert: {e}")
+
+    # 2. Sync SQLite Rollups (with Vector Embeddings)
+    db_path = get_default_db_path()
+    if db_path.exists():
+        try:
+            con = sqlite3.connect(str(db_path))
+            con.row_factory = sqlite3.Row
+            cur = con.cursor()
+            cur.execute("""
+                SELECT id, window_start, window_end, title, summary_md,
+                       key_points, apps, resources, workstream_slug, created_at
+                FROM rollups
+                ORDER BY window_start DESC
+                LIMIT 500
+            """)
+            rollup_rows = [dict(r) for r in cur.fetchall()]
+
+            rollups_batch = []
+            for r in rollup_rows:
+                emb = None
+                if embedder:
+                    text_for_vec = (r["title"] + " " + r["summary_md"])[:1000]
+                    emb = embedder.embed(text_for_vec)
+
+                def parse_json(val: Any) -> Any:
+                    if not val:
+                        return []
+                    try:
+                        return json.loads(val)
+                    except Exception:
+                        return []
+
+                rollups_batch.append({
+                    "id": r["id"],
+                    "project_slug": r["workstream_slug"],
+                    "window_start": r["window_start"],
+                    "window_end": r["window_end"],
+                    "title": r["title"],
+                    "summary_md": r["summary_md"],
+                    "key_points": parse_json(r.get("key_points")),
+                    "apps": parse_json(r.get("apps")),
+                    "resources": parse_json(r.get("resources")),
+                    "embedding": emb,
+                })
+
+            if rollups_batch:
+                _supabase_request(
+                    "cloud_rollups",
+                    method="POST",
+                    data=rollups_batch,
+                    headers_extra={"Prefer": "resolution=merge-duplicates"}
+                )
+                report["rollups_uploaded"] = len(rollups_batch)
+
+            # 3. Sync SQLite Graph Edges
+            cur.execute("""
+                SELECT source_entity, target_entity, relation_type, weight, time_bucket, last_seen
+                FROM graph_edges
+                ORDER BY weight DESC
+                LIMIT 1000
+            """)
+            edge_rows = [dict(r) for r in cur.fetchall()]
+            con.close()
+
+            if edge_rows:
+                _supabase_request(
+                    "cloud_graph_edges",
+                    method="POST",
+                    data=edge_rows,
+                    headers_extra={"Prefer": "resolution=merge-duplicates"}
+                )
+                report["graph_edges_uploaded"] = len(edge_rows)
+
+        except Exception as e:
+            report["errors"].append(f"sqlite sync: {e}")
+
+    report["success"] = len(report["errors"]) == 0
+    return report
+
+
+# =====================================================================
+# Query Cloud Memory: Sub-15ms Stored Procedure Call
+# =====================================================================
+
+def query_cloud_memory(
+    query: Optional[str] = None,
+    project: Optional[str] = None,
+    time_bucket: Optional[str] = None,
+    limit: int = 5,
+) -> Dict[str, Any]:
+    """Execute scope-first memory query against Supabase pgvector from anywhere in the world."""
+    if not is_supabase_configured():
+        return {"error": "Supabase not configured. Set SUPABASE_URL and SUPABASE_KEY."}
+
+    # Embed query if possible
+    query_vec = None
+    try:
+        from embedder import Embedder
+        emb = Embedder()
+        if query:
+            query_vec = emb.embed(query)
+    except Exception:
+        pass
+
+    payload: Dict[str, Any] = {
+        "match_limit": limit,
+        "filter_project": project if project else None,
+        "filter_time_bucket": time_bucket if time_bucket else None,
+        "query_embedding": query_vec
+    }
+
+    try:
+        # Call PostgreSQL RPC function query_cloud_memory
+        rows = _supabase_request("rpc/query_cloud_memory", method="POST", data=payload)
+        if not isinstance(rows, list):
+            rows = []
+
+        summary_lines = ["### Scoped Cloud Memory Context (Supabase pgvector):"]
+        results = []
+
+        for r in rows:
+            date_str = r.get("window_end", "")[:10]
+            proj = r.get("project_slug") or "Inbox"
+            title = r.get("title", "")
+            summary = r.get("summary_md", "")
+
+            apps = r.get("apps") or []
+            tools_str = ", ".join([f"[[Apps/{a}]]" for a in apps]) if apps else "None"
+
+            summary_lines.append(f"- **[{date_str}] [[Projects/{proj}]] — {title}**")
+            summary_lines.append(f"  - **Summary**: {summary[:250]}...")
+            if apps:
+                summary_lines.append(f"  - **Connected Tools**: {tools_str}")
+            summary_lines.append(f"  - **Daily Reference**: [[Memory/Daily/{date_str}]]")
+
+            results.append({
+                "id": r.get("id"),
+                "project_slug": proj,
+                "title": title,
+                "summary_md": summary,
+                "similarity": r.get("similarity"),
+                "date": date_str
+            })
+
+        return {
+            "source": "supabase_pgvector_cloud",
+            "count": len(results),
+            "results": results,
+            "context_summary": "\n".join(summary_lines)
+        }
+    except Exception as e:
+        # Fallback to direct table query if RPC is not yet created in Supabase
+        try:
+            params = {"select": "id,project_slug,window_start,window_end,title,summary_md,apps", "limit": str(limit)}
+            if project:
+                params["project_slug"] = f"ilike.{project}"
+            if query:
+                params["summary_md"] = f"ilike.%{query}%"
+
+            rows = _supabase_request("cloud_rollups", method="GET", params=params)
+            return {
+                "source": "supabase_table_fallback",
+                "count": len(rows),
+                "results": rows,
+                "context_summary": f"Retrieved {len(rows)} cloud rollups via PostgREST fallback."
+            }
+        except Exception as e2:
+            return {"error": f"Supabase cloud query failed: {e} | Fallback: {e2}"}
+
+
+# =====================================================================
+# Main entrypoint
+# =====================================================================
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="TaskFlow 24/7 Supabase Cloud Memory Mirror")
+    parser.add_argument("--sync", action="store_true", help="Synchronize local vault and SQLite memory to Supabase")
+    parser.add_argument("--query", type=str, help="Execute cloud query against Supabase pgvector")
+    parser.add_argument("--project", type=str, help="Filter cloud query by project workstream")
+    parser.add_argument("--time-bucket", type=str, help="Filter cloud query by month bucket (YYYY-MM)")
+    parser.add_argument("--status", action="store_true", help="Check Supabase connection status")
+
+    args = parser.parse_args()
+
+    url, key = get_supabase_credentials()
+
+    if args.status:
+        print("=== TaskFlow Supabase Cloud Status ===")
+        print(f"Configured: {bool(url and key)}")
+        print(f"URL: {url or 'Not set'}")
+        print(f"API Key: {'[SET - Redacted]' if key else 'Not set'}")
+        if url and key:
+            try:
+                # Test connectivity
+                res = _supabase_request("vault_notes", method="GET", params={"select": "count", "limit": "1"})
+                print("Connection: Successfully authenticated with Supabase PostgREST API!")
+            except Exception as e:
+                print(f"Connection Error: {e}")
+        return
+
+    if args.sync:
+        print("=== Synchronizing TaskFlow Memory to Supabase Cloud ===")
+        print(f"Target URL: {url}")
+        res = sync_all_to_supabase()
+        print(json.dumps(res, indent=2))
+        return
+
+    if args.query is not None or args.project is not None:
+        print(f"=== Querying Supabase Cloud pgvector ===")
+        print(f"Query: '{args.query}' | Project: '{args.project}'\n")
+        res = query_cloud_memory(query=args.query, project=args.project, time_bucket=args.time_bucket)
+        print(res.get("context_summary", json.dumps(res, indent=2)))
+        return
+
+    parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

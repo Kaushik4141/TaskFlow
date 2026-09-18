@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "taskflow": {
+      "command": "python3",
+      "args": [
+        "/home/kaushi/Projects/TaskFlow/sidecar/mcp_server.py"
+      ],
+      "env": {
+        "TASKFLOW_VAULT": "/home/kaushi/Documents/Vault/",
+        "TASKFLOW_DB": "/home/kaushi/.local/share/com.taskflow.desktop/taskflow.sqlite"
+      }
+    }
+  }
+}
