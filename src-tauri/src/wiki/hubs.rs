@@ -93,16 +93,16 @@ pub fn upsert_hub_page(
             // maintains the running narrative in `## Status` (via the synthesis
             // block), so we deliberately do NOT freeze `status:` into frontmatter
             // here — it would drift from the LLM narrative.
-            let frontmatter = match kind {
-                HubKind::Project => format!(
-                    "---\ntype: hub_page\nkind: {}\nslug: {slug}\nlast_touched: {today_date}\n---\n",
-                    kind.folder_name(),
-                ),
-                _ => format!(
-                    "---\ntype: hub_page\nkind: {}\nslug: {slug}\n---\n",
-                    kind.folder_name(),
-                ),
+            let tag_name = match kind {
+                HubKind::App => "taskflow/app",
+                HubKind::Site => "taskflow/site",
+                HubKind::Activity => "taskflow/activity",
+                HubKind::Project => "taskflow/project",
             };
+            let frontmatter = format!(
+                "---\ntype: hub_page\nkind: {}\nslug: {slug}\ntags:\n  - {tag_name}\nlast_touched: {today_date}\n---\n",
+                kind.folder_name(),
+            );
             let synthesis_block = match synthesis.map(str::trim) {
                 Some(text) if !text.is_empty() => format!("{SYNTHESIS_HEADING}\n{text}\n\n"),
                 _ => String::new(),
@@ -119,12 +119,10 @@ pub fn upsert_hub_page(
 
     let mut lines: Vec<String> = existing.lines().map(ToString::to_string).collect();
 
-    // Step 1 (projects only): advance `last_touched` frontmatter to today, so the
-    // field reflects the most recent day this project was active. Harmless no-op
-    // for other kinds; preserves any other frontmatter verbatim.
-    if kind == HubKind::Project {
-        touch_last_touched(&mut lines, today_date);
-    }
+    // Step 1: advance `last_touched` frontmatter to today on all hubs, so the
+    // field reflects the most recent day this entity was active. Preserves
+    // any other frontmatter verbatim.
+    touch_last_touched(&mut lines, today_date);
 
     // Step 2: refresh the LLM synthesis section, if one was supplied.
     if let Some(text) = synthesis.map(str::trim) {
@@ -356,13 +354,12 @@ pub fn update_index(vault: &Path, today_date: &str, summary: &str) -> io::Result
         summary.trim(),
     );
 
-    // Only keep the catalog's entry (bullet) lines. The title + preamble are
-    // re-emitted below, so reading them back in here would duplicate the header
-    // on every ingest.
+    // Only keep the catalog's daily entry lines. The title, hubs, and preamble are
+    // re-emitted below, so reading them back in here would duplicate headers.
     let mut lines: Vec<String> = match fs::read_to_string(&path) {
         Ok(content) => content
             .lines()
-            .filter(|line| line.trim_start().starts_with("- "))
+            .filter(|line| line.trim_start().starts_with("- ") && line.contains("[[Memory/Daily/"))
             .map(ToString::to_string)
             .collect(),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Vec::new(),
@@ -381,9 +378,66 @@ pub fn update_index(vault: &Path, today_date: &str, summary: &str) -> io::Result
         lines.push(entry);
     }
 
+    let collect_slugs = |folder: &str| -> Vec<String> {
+        let mut slugs = Vec::new();
+        let dir = vault.join("TaskFlow").join(folder);
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.extension().and_then(|e| e.to_str()) == Some("md") {
+                    if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                        if !stem.is_empty() {
+                            slugs.push(stem.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        slugs.sort();
+        slugs
+    };
+
+    let projects = collect_slugs("Projects");
+    let apps = collect_slugs("Apps");
+    let sites = collect_slugs("Sites");
+
     let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str("type: graph_index\n");
+    out.push_str("title: TaskFlow Memory Index\n");
+    out.push_str("tags:\n");
+    out.push_str("  - taskflow/index\n");
+    out.push_str("  - moc\n");
+    out.push_str(&format!("last_updated: {today_date}\n"));
+    out.push_str("---\n\n");
     out.push_str("# TaskFlow Memory Index\n\n");
-    out.push_str("A chronological catalog of every daily memory note. Updated on every ingest.\n\n");
+    out.push_str("A chronological catalog and Map of Content (MOC) connecting all workstreams, hubs, and daily notes.\n\n");
+
+    if !projects.is_empty() {
+        out.push_str("## Active Projects\n");
+        for slug in &projects {
+            out.push_str(&format!("- [[Projects/{slug}]]\n"));
+        }
+        out.push('\n');
+    }
+
+    if !apps.is_empty() {
+        out.push_str("## Primary Tools & Apps\n");
+        for slug in &apps {
+            out.push_str(&format!("- [[Apps/{slug}]]\n"));
+        }
+        out.push('\n');
+    }
+
+    if !sites.is_empty() {
+        out.push_str("## Referenced Sites\n");
+        for slug in &sites {
+            out.push_str(&format!("- [[Sites/{slug}]]\n"));
+        }
+        out.push('\n');
+    }
+
+    out.push_str("## Daily Memory Notes\n");
     for line in &lines {
         out.push_str(line);
         out.push('\n');
@@ -481,4 +535,64 @@ Updated on every ingest; re-ingesting a day replaces its rows in place.\n"
     }
     fs::write(&path, out)?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TEST_SEQ: AtomicUsize = AtomicUsize::new(0);
+
+    fn fresh_vault(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "taskflow-hubs-test-{name}-{}",
+            TEST_SEQ.fetch_add(1, Ordering::SeqCst)
+        ));
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).ok();
+        }
+        std::fs::create_dir_all(&dir).expect("create temp vault");
+        dir
+    }
+
+    #[test]
+    fn hub_page_frontmatter_carries_tags_and_last_touched() {
+        let vault = fresh_vault("fm_tags");
+        let app_path = upsert_hub_page(&vault, HubKind::App, "cursor", "2026-09-18", "coding", None)
+            .expect("upsert app ok");
+        let app_content = std::fs::read_to_string(app_path).unwrap();
+        assert!(app_content.contains("tags:\n  - taskflow/app"), "app tag: {app_content}");
+        assert!(app_content.contains("last_touched: 2026-09-18"), "app last_touched: {app_content}");
+
+        let site_path = upsert_hub_page(&vault, HubKind::Site, "github.com", "2026-09-18", "pr review", None)
+            .expect("upsert site ok");
+        let site_content = std::fs::read_to_string(site_path).unwrap();
+        assert!(site_content.contains("tags:\n  - taskflow/site"), "site tag: {site_content}");
+        assert!(site_content.contains("last_touched: 2026-09-18"), "site last_touched: {site_content}");
+    }
+
+    #[test]
+    fn update_index_generates_moc_sections() {
+        let vault = fresh_vault("moc_index");
+        // Seed an app, a site, and a project page
+        let _ = upsert_hub_page(&vault, HubKind::App, "cursor", "2026-09-18", "coding", None).unwrap();
+        let _ = upsert_hub_page(&vault, HubKind::Site, "github.com", "2026-09-18", "pr review", None).unwrap();
+        let _ = upsert_hub_page(&vault, HubKind::Project, "TaskFlow", "2026-09-18", "workstream", None).unwrap();
+
+        let index_path = update_index(&vault, "2026-09-18", "Engine optimization")
+            .expect("update index ok");
+        let index_content = std::fs::read_to_string(index_path).unwrap();
+
+        assert!(index_content.contains("type: graph_index"), "index frontmatter: {index_content}");
+        assert!(index_content.contains("tags:\n  - taskflow/index\n  - moc"), "index tags: {index_content}");
+        assert!(index_content.contains("## Active Projects"), "active projects section: {index_content}");
+        assert!(index_content.contains("- [[Projects/TaskFlow]]"), "taskflow project linked: {index_content}");
+        assert!(index_content.contains("## Primary Tools & Apps"), "tools section: {index_content}");
+        assert!(index_content.contains("- [[Apps/cursor]]"), "cursor app linked: {index_content}");
+        assert!(index_content.contains("## Referenced Sites"), "sites section: {index_content}");
+        assert!(index_content.contains("- [[Sites/github.com]]"), "github site linked: {index_content}");
+        assert!(index_content.contains("## Daily Memory Notes"), "daily notes section: {index_content}");
+        assert!(index_content.contains("- 2026-09-18 - Engine optimization → [[Memory/Daily/2026-09-18]]"), "daily entry: {index_content}");
+    }
 }

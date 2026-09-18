@@ -112,10 +112,25 @@ async fn render_daily_index(
         "source: rollup_index".to_string(),
         format!("date: {date}"),
         format!("rollups: {}", rollups.len()),
+        "tags:".to_string(),
+        "  - taskflow/daily".to_string(),
+        "  - memory".to_string(),
         "workstreams:".to_string(),
     ];
     for slug in workstreams.keys() {
         lines.push(format!("  - {slug}"));
+    }
+    if !apps.is_empty() {
+        lines.push("apps:".to_string());
+        for app in &apps {
+            lines.push(format!("  - {app}"));
+        }
+    }
+    if !sites.is_empty() {
+        lines.push("sites:".to_string());
+        for site in &sites {
+            lines.push(format!("  - {site}"));
+        }
     }
     lines.extend([
         "---".to_string(),

@@ -40,6 +40,22 @@ pub fn start(app: AppHandle, state: AppState) {
 
             if let Some(clipboard) = clipboard.as_mut() {
                 if let Ok(text) = clipboard.get_text() {
+                    let is_quarantined = state
+                        .privacy_filter
+                        .read()
+                        .map(|privacy| privacy.is_clipboard_quarantined(&text))
+                        .unwrap_or(false);
+
+                    if is_quarantined {
+                        if last_content != "[QUARANTINED]" {
+                            last_content = "[QUARANTINED]".to_string();
+                            eprintln!("[taskflow:clipboard] Quarantining sensitive clipboard copy (secret/token/key detected)");
+                            log::info!("Quarantining sensitive clipboard copy (secret/token/key detected)");
+                        }
+                        thread::sleep(Duration::from_millis(500));
+                        continue;
+                    }
+
                     let content = state
                         .privacy_filter
                         .read()

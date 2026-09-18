@@ -114,7 +114,23 @@ pub fn start(app: AppHandle, state: AppState) {
                         emit_and_store_title_only(&app, &state, &snapshot, task_id.clone());
                 }
 
-                if capture_screen_text
+                let is_sensitive_window = state
+                    .privacy_filter
+                    .read()
+                    .map(|f| f.is_sensitive_window_for_deep_capture(&snapshot.window_title))
+                    .unwrap_or(false);
+
+                if is_sensitive_window {
+                    eprintln!(
+                        "[taskflow:capture] Skipping deep capture for sensitive window: {} - {}",
+                        snapshot.app_name, snapshot.window_title
+                    );
+                    log::info!(
+                        "Skipping deep capture for sensitive window: {} - {}",
+                        snapshot.app_name,
+                        snapshot.window_title
+                    );
+                } else if capture_screen_text
                     && task_id.is_some()
                     && should_deep_capture(&window_key, changed, &last_deep_read)
                     && !in_capture_backoff(&state, &snapshot.app_name)
