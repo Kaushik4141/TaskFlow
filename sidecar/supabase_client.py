@@ -271,10 +271,12 @@ def sync_all_to_supabase() -> Dict[str, Any]:
 
         if notes_batch:
             try:
+                conflict_col = "user_id,path" if user_id else "path"
                 _supabase_request(
                     "vault_notes",
                     method="POST",
                     data=notes_batch,
+                    params={"on_conflict": conflict_col},
                     headers_extra={"Prefer": "resolution=merge-duplicates"}
                 )
                 report["vault_notes_uploaded"] = len(notes_batch)
@@ -333,6 +335,7 @@ def sync_all_to_supabase() -> Dict[str, Any]:
                     "cloud_rollups",
                     method="POST",
                     data=rollups_batch,
+                    params={"on_conflict": "id"},
                     headers_extra={"Prefer": "resolution=merge-duplicates"}
                 )
                 report["rollups_uploaded"] = len(rollups_batch)
@@ -352,10 +355,12 @@ def sync_all_to_supabase() -> Dict[str, Any]:
                     edge["user_id"] = user_id
 
             if edge_rows:
+                conflict_col = "user_id,source_entity,target_entity,relation_type,time_bucket" if user_id else "source_entity,target_entity,relation_type,time_bucket"
                 _supabase_request(
                     "cloud_graph_edges",
                     method="POST",
                     data=edge_rows,
+                    params={"on_conflict": conflict_col},
                     headers_extra={"Prefer": "resolution=merge-duplicates"}
                 )
                 report["graph_edges_uploaded"] = len(edge_rows)
