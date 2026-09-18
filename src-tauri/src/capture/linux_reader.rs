@@ -101,13 +101,7 @@ impl LinuxReader {
             window.get("pid").and_then(Value::as_i64) == Some(i64::from(pid))
                 && window.get("title").and_then(Value::as_str) == Some(window_title)
         })?;
-        let x = window.pointer("/at/x").and_then(Value::as_i64)?;
-        let y = window.pointer("/at/y").and_then(Value::as_i64)?;
-        let width = window.pointer("/size/width").and_then(Value::as_i64)?;
-        let height = window.pointer("/size/height").and_then(Value::as_i64)?;
-        if width <= 0 || height <= 0 {
-            return None;
-        }
+        let (x, y, width, height) = parse_hyprland_geometry(&window)?;
 
         let geometry = format!("{x},{y} {width}x{height}");
         self.ocr_command(
@@ -330,6 +324,29 @@ fn x11_active_window() -> Option<LinuxWindow> {
     })
 }
 
+fn parse_hyprland_geometry(window: &Value) -> Option<(i64, i64, i64, i64)> {
+    let x = window
+        .pointer("/at/0")
+        .or_else(|| window.pointer("/at/x"))
+        .and_then(Value::as_i64)?;
+    let y = window
+        .pointer("/at/1")
+        .or_else(|| window.pointer("/at/y"))
+        .and_then(Value::as_i64)?;
+    let width = window
+        .pointer("/size/0")
+        .or_else(|| window.pointer("/size/width"))
+        .and_then(Value::as_i64)?;
+    let height = window
+        .pointer("/size/1")
+        .or_else(|| window.pointer("/size/height"))
+        .and_then(Value::as_i64)?;
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    Some((x, y, width, height))
+}
+
 fn parse_x11_window_id(line: &str) -> Option<isize> {
     let value = line.split('#').nth(1)?.split(',').next()?.trim();
     parse_x11_number(value)
@@ -454,5 +471,37 @@ mod tests {
             content_type("obsidian"),
             ContentType::GenericContent
         ));
+    }
+
+    #[test]
+    fn parses_hyprland_window_geometry() {
+        let json = serde_json::json!({
+            "at": [3258, 21],
+            "size": [908, 1038]
+        });
+        assert_eq!(
+            parse_hyprland_geometry(&json),
+            Some((3258, 21, 908, 1038))
+        );
+
+        let fallback_obj = serde_json::json!({
+            "at": {"x": 100, "y": 200},
+            "size": {"width": 800, "height": 600}
+        });
+        assert_eq!(
+            parse_hyprland_geometry(&fallback_obj),
+            Some((100, 200, 800, 600))
+        );
+
+        let invalid_size = serde_json::json!({
+            "at": [100, 200],
+            "size": [0, 500]
+        });
+        assert_eq!(parse_hyprland_geometry(&invalid_size), None);
+
+        let missing = serde_json::json!({
+            "title": "foot"
+        });
+        assert_eq!(parse_hyprland_geometry(&missing), None);
     }
 }
