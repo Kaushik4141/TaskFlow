@@ -327,13 +327,7 @@ select {
   }
 }
 
-/* Settings tab labels: hide when the sidebar container is narrow */
+/* Settings tab labels: always visible */
 .tab-label {
-  display: none;
-}
-
-@container (min-width: 280px) {
-  .tab-label {
-    display: inline;
-  }
+  display: inline;
 }

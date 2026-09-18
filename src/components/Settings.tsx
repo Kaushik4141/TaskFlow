@@ -218,17 +218,31 @@ export default function Settings() {
     <div className="flex h-full flex-col overflow-hidden" style={{ containerType: 'inline-size' }}>
       {/* Compact header + tab bar */}
       <div className="shrink-0 border-b border-white/[0.06] px-4 pb-3 pt-5">
-        <h1 className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-white/50">Settings</h1>
+        <div className="mb-3 flex items-center justify-between">
+          <h1 className="text-[13px] font-semibold uppercase tracking-[0.12em] text-white/50">Settings</h1>
+          <button
+            type="button"
+            onClick={() => setActiveSection(activeSection === 'developer' ? 'capture' : 'developer')}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${
+              activeSection === 'developer'
+                ? 'bg-brand-500 text-white shadow-glow-sm'
+                : 'border border-brand-500/40 bg-brand-500/15 text-brand-200 hover:bg-brand-500/25 hover:text-white shadow-sm'
+            }`}
+          >
+            <TerminalIcon className="h-3.5 w-3.5 text-brand-300" />
+            <span>{activeSection === 'developer' ? '← Back to Settings' : 'Developer Options'}</span>
+          </button>
+        </div>
         <div className="flex gap-1 rounded-lg bg-white/[0.04] p-0.5">
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              className={`relative z-10 flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+              className={`relative z-10 flex flex-1 items-center justify-center gap-1 rounded-md px-1 py-1.5 text-[11px] font-semibold transition-colors ${
                 activeSection === tab.id ? 'text-white' : 'text-white/40 hover:text-white/70'
               }`}
               onClick={() => setActiveSection(tab.id)}
               type="button"
-              title={tab.id === 'developer' ? 'Developer Options' : tab.label}
+              title={tab.label}
             >
               {activeSection === tab.id && (
                 <motion.div
@@ -238,7 +252,7 @@ export default function Settings() {
                 />
               )}
               {tab.icon}
-              <span className="tab-label">{tab.label}</span>
+              <span className="truncate">{tab.label}</span>
             </button>
           ))}
         </div>
@@ -273,6 +287,7 @@ export default function Settings() {
                 saveObsidianSettings={saveObsidianSettings}
                 syncCurrentToObsidian={syncCurrentToObsidian}
                 setShowDeepCapture={setShowDeepCapture}
+                onOpenDeveloper={() => setActiveSection('developer')}
               />
             </motion.div>
           ) : activeSection === 'integrations' ? (
@@ -313,7 +328,7 @@ export default function Settings() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.15 }}
             >
-              <DeveloperSection />
+              <DeveloperSection onBack={() => setActiveSection('capture')} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -333,19 +348,28 @@ export default function Settings() {
 /* Sections                                                          */
 /* ---------------------------------------------------------------- */
 
-function DeveloperSection() {
+function DeveloperSection({ onBack }: { onBack: () => void }) {
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2.5">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-300 ring-1 ring-brand-500/20">
-          <SettingsIcon className="h-4 w-4" />
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-300 ring-1 ring-brand-500/20">
+            <SettingsIcon className="h-4 w-4" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold tracking-tight text-white">Developer Options</h2>
+            <p className="text-[11px] text-white/50">
+              Live raw event stream (last 50 events) and window telemetry
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-sm font-semibold tracking-tight text-white">Developer Options</h2>
-          <p className="text-[11px] text-white/50">
-            Live raw event stream (last 50 events) and window telemetry
-          </p>
-        </div>
+        <button
+          type="button"
+          onClick={onBack}
+          className="rounded-lg border border-white/10 px-2.5 py-1 text-xs text-white/60 hover:bg-white/5 hover:text-white transition-colors"
+        >
+          ← Settings
+        </button>
       </div>
       <EventFeed />
     </div>
@@ -370,6 +394,7 @@ function CaptureSection({
   saveObsidianSettings,
   syncCurrentToObsidian,
   setShowDeepCapture,
+  onOpenDeveloper,
 }: {
   workflow: { mode: 'manual' | 'continuous' | 'selective'; selectiveApps: string; retentionHours: number }
   setWorkflow: Dispatch<SetStateAction<typeof workflow>>
@@ -388,6 +413,7 @@ function CaptureSection({
   saveObsidianSettings: () => void
   syncCurrentToObsidian: () => void
   setShowDeepCapture: (show: boolean) => void
+  onOpenDeveloper: () => void
 }) {
   // Vault health is a transient, on-demand read — it belongs to this panel's
   // lifetime, not to the settings that get persisted.
@@ -620,6 +646,29 @@ function CaptureSection({
           All data stays on your device.
         </p>
       </CollapsibleSection>
+
+      {/* Developer Options Banner in Capture Section */}
+      <div className="rounded-xl border border-brand-500/30 bg-gradient-to-r from-brand-500/10 to-brand-500/5 p-3.5 mt-4 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500/20 text-brand-300 ring-1 ring-brand-500/30">
+              <TerminalIcon className="h-4 w-4" />
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-white">Developer Options</h3>
+              <p className="text-[11px] text-white/50">Live raw event stream & telemetry</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenDeveloper}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white shadow-glow-sm hover:bg-brand-400 transition-all shrink-0"
+          >
+            <span>Open Feed</span>
+            <span>→</span>
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
