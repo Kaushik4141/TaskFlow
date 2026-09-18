@@ -1,42 +1,49 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "TaskFlow MCP Client Configurations",
-  "description": "Example MCP client configuration snippets for connecting external AI agents to TaskFlow",
+  "description": "Configuration snippets for connecting Claude Desktop, Cursor, Hermes, and external AI agents to the TaskFlow Second Brain",
   "examples": {
-    "claude_desktop_and_cursor": {
-      "description": "Add this to %APPDATA%\\Claude\\claude_desktop_config.json or .cursor/mcp.json",
+    "claude_desktop_linux_macos": {
+      "description": "Add this to ~/.config/Claude/claude_desktop_config.json",
       "mcpServers": {
         "taskflow": {
-          "command": "d:\\TaskFlow\\.venv-sidecar\\Scripts\\python.exe",
+          "command": "python3",
           "args": [
-            "d:\\TaskFlow\\sidecar\\mcp_server.py"
+            "/home/kaushi/Projects/TaskFlow/sidecar/mcp_server.py"
           ],
           "env": {
-            "PYTHONPATH": "d:\\TaskFlow\\sidecar"
+            "TASKFLOW_VAULT": "/home/kaushi/Documents/Vault/",
+            "TASKFLOW_DB": "/home/kaushi/.local/share/com.taskflow.desktop/taskflow.sqlite"
           }
         }
       }
     },
-    "hermes_agent_stdio": {
-      "description": "Hermes Agent local stdio configuration",
+    "cursor_and_vscode": {
+      "description": "Add this to .cursor/mcp.json or VS Code Cline / Roo Code settings",
       "mcpServers": {
-        "taskflow-brain": {
-          "command": "d:\\TaskFlow\\.venv-sidecar\\Scripts\\python.exe",
+        "taskflow": {
+          "command": "python3",
           "args": [
-            "d:\\TaskFlow\\sidecar\\mcp_server.py",
-            "--transport",
-            "stdio"
+            "/home/kaushi/Projects/TaskFlow/sidecar/mcp_server.py"
           ]
         }
       }
     },
-    "openclaw_or_remote_hermes_sse": {
-      "description": "Run the server first with: python sidecar/mcp_server.py --transport sse --port 8765",
+    "claude_desktop_windows": {
+      "description": "Add this to %APPDATA%\\Claude\\claude_desktop_config.json",
       "mcpServers": {
-        "taskflow-remote": {
-          "url": "http://127.0.0.1:8765/sse"
+        "taskflow": {
+          "command": "python",
+          "args": [
+            "C:\\Users\\Username\\Projects\\TaskFlow\\sidecar\\mcp_server.py"
+          ]
         }
       }
     }
+  },
+  "judging_demo_prompt": {
+    "scenario": "Live judging round query demonstration",
+    "prompt": "Using your TaskFlow memory tools, what specific work did I do on TaskFlow or Devfolio today? Detail the tools used and cite the exact obsidian daily note.",
+    "expected_behavior": "Agent calls query_graph_memory or read_manifest and returns the exact ground truth with tools [[Apps/ghostty]], [[Apps/codium]] and link [[Memory/Daily/2026-09-18]] in ~1.5 seconds."
   }
 }
