@@ -1,30 +1,32 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { differenceInSeconds, formatDistanceStrict, parseISO } from 'date-fns'
-import { BookOpenTextIcon, LoaderCircleIcon, PauseIcon, PlayIcon } from '@animateicons/react/lucide'
+import { BookOpenTextIcon, SparklesIcon } from '@animateicons/react/lucide'
 import { useTaskStore } from '../stores/taskStore'
-import type { CaptureStats, Task } from '../types'
+import type { Task } from '../types'
 import Documentation from './Documentation'
-import EventFeed from './EventFeed'
-import Timeline from './Timeline'
+import EventDetail from './EventDetail'
+import { SkeletonDocument } from './Skeleton'
 import { useStaggerContainer, useStaggerItem } from '../lib/motion'
-
-type TaskView = 'timeline' | 'feed' | 'docs'
 
 export default function ActiveTask({ task }: { task: Task }) {
   const {
-    startTask,
-    stopTask,
     addNote,
-    sidecarReady,
     documentation,
     isGenerating,
-    captureStats,
+    generateDocumentation,
     fetchCaptureStats,
+    rollups,
+    selectedRollupId,
+    setSelectedRollupId,
   } = useTaskStore()
   const [note, setNote] = useState('')
   const [now, setNow] = useState(Date.now())
-  const [view, setView] = useState<TaskView>('timeline')
+
+  const selectedRollup = useMemo(
+    () => (selectedRollupId ? rollups.find((r) => r.id === selectedRollupId) ?? null : null),
+    [rollups, selectedRollupId],
+  )
 
   useEffect(() => {
     if (task.status !== 'active') {
@@ -51,177 +53,105 @@ export default function ActiveTask({ task }: { task: Task }) {
     setNote('')
   }
 
-  const handleTaskToggle = async () => {
-    if (task.status === 'active') {
-      // Stop = flush: the backend rolls up the final window and the timeline
-      // updates via the store — no more one-shot full-task generate.
-      await stopTask(task.id)
-      setView('timeline')
-    } else {
-      await startTask(task.id)
-      setView('timeline')
-    }
-  }
-
   const metricsV = useStaggerContainer(0.06)
   const metricV = useStaggerItem()
 
   return (
     <div className="flex h-full flex-col">
-      <header className="relative overflow-hidden border-b border-white/[0.06] p-6">
-        {/* Header ambient glow when task is active */}
-        {task.status === 'active' && (
-          <div
-            className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full opacity-40 blur-[80px]"
-            style={{ background: 'radial-gradient(circle, rgba(255, 59, 71, 0.4), transparent 70%)' }}
-          />
-        )}
-        <div className="relative flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-white/40">{task.source}</span>
-              {task.status === 'active' && (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-200">
-                  <span className="relative flex h-1.5 w-1.5">
-                    <span className="absolute inline-flex h-full w-full animate-pulse-ring rounded-full bg-brand-500 opacity-60" />
-                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-500" />
-                  </span>
-                  Recording
-                </span>
-              )}
-            </div>
-            <h1 className="mt-1.5 text-balance text-2xl font-semibold tracking-tight text-white">{task.title}</h1>
-            {task.description && <p className="mt-2 max-w-3xl text-sm leading-6 text-white/50">{task.description}</p>}
-          </div>
-          <div className="flex flex-col items-end gap-3">
-            <div className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-sm text-white/70">
-              <span className={`relative flex h-2.5 w-2.5 ${sidecarReady ? '' : 'opacity-50'}`}>
-                {sidecarReady && <span className="absolute inline-flex h-full w-full animate-pulse-ring rounded-full bg-brand-400 opacity-50" />}
-                <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${sidecarReady ? 'bg-brand-500' : 'bg-white/30'}`} />
-              </span>
-              {sidecarReady ? 'AI ready' : 'AI loading...'}
-            </div>
-            <div className="flex flex-wrap justify-end gap-2">
-              {documentation && task.status !== 'active' && (
-                <motion.button
-                  type="button"
-                  whileHover={{ y: -1 }}
-                  whileTap={{ scale: 0.97 }}
-                  className="btn-ghost"
-                  onClick={() => setView((current) => (current === 'docs' ? 'timeline' : 'docs'))}
-                >
-                  <BookOpenTextIcon className="h-[18px] w-[18px]" />
-                  {view === 'docs' ? 'Hide Documentation' : 'View Documentation'}
-                </motion.button>
-              )}
-              <motion.button
-                type="button"
-                whileHover={{ y: -1 }}
-                whileTap={{ scale: 0.97 }}
-                className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
-                  task.status === 'active'
-                    ? 'border border-white/10 bg-white/[0.04] text-white/90 hover:border-white/20 hover:bg-white/[0.08] hover:text-white'
-                    : 'border border-white/15 bg-white/[0.08] text-white hover:border-white/25 hover:bg-white/[0.12] shadow-elevated'
-                }`}
-                disabled={isGenerating}
-                onClick={() => void handleTaskToggle()}
-              >
-                {isGenerating ? (
-                  <LoaderCircleIcon className="h-[18px] w-[18px] animate-spin" />
-                ) : task.status === 'active' ? (
-                  <PauseIcon className="h-[18px] w-[18px]" />
-                ) : (
-                  <PlayIcon className="h-[18px] w-[18px]" />
-                )}
-                {isGenerating ? 'Generating...' : task.status === 'active' ? 'Stop Task' : 'Start Task'}
-              </motion.button>
-            </div>
-            {isGenerating && (
-              <p className="max-w-xs text-right text-xs leading-5 text-white/40">
-                Generating with local AI may take a few minutes on first run.
-              </p>
-            )}
-          </div>
-        </div>
-        <motion.div
-          variants={metricsV}
-          initial="hidden"
-          animate="show"
-          className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3"
-        >
-          <motion.div variants={metricV}>
-            <Metric label="Status" value={task.status} accent={task.status === 'active'} />
-          </motion.div>
-          <motion.div variants={metricV}>
-            <Metric label="Duration" value={duration(task, now)} />
-          </motion.div>
-          <motion.div variants={metricV}>
-            <Metric label="Created" value={new Date(task.createdAt).toLocaleString()} />
-          </motion.div>
-        </motion.div>
-
-      </header>
-
-      <div className="border-b border-white/[0.06] px-6 pt-3">
-        <div className="flex gap-1">
-          {(
-            [
-              { id: 'timeline' as TaskView, label: 'Timeline' },
-              { id: 'feed' as TaskView, label: 'Live Feed' },
-              ...(documentation ? [{ id: 'docs' as TaskView, label: 'Documentation' }] : []),
-            ]
-          ).map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setView(tab.id)}
-              className={`relative rounded-t-lg px-3 py-2 text-xs font-semibold transition-colors ${
-                view === tab.id ? 'text-white' : 'text-white/40 hover:text-white/70'
-              }`}
-            >
-              {tab.label}
-              {view === tab.id && (
-                <motion.div layoutId="active-task-tab" className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-brand-500" />
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="relative min-h-0 flex-1 overflow-y-auto">
+      {/* Primary Workspace View: Event Detail (if clicked in left sidebar) OR Task Documentation */}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         <AnimatePresence mode="wait">
-          {view === 'docs' && documentation ? (
-            <motion.div
-              key="docs"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.22 }}
-              className="h-full"
-            >
-              <Documentation documentation={documentation} />
-            </motion.div>
-          ) : view === 'feed' ? (
-            <motion.div
-              key="feed"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.22 }}
-              className="h-full"
-            >
-              <EventFeed taskId={task.id} />
-            </motion.div>
+          {selectedRollup ? (
+            <EventDetail
+              key={selectedRollup.id}
+              rollup={selectedRollup}
+              taskTitle={task.title}
+              onBack={() => setSelectedRollupId(null)}
+            />
           ) : (
             <motion.div
-              key="timeline"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.22 }}
-              className="h-full"
+              key="task-doc-view"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="flex h-full flex-col overflow-y-auto"
             >
-              <Timeline taskId={task.id} />
+              <header className="relative overflow-hidden border-b border-white/[0.06] p-6 pt-14 shrink-0">
+                {/* Header ambient glow when task is active */}
+                {task.status === 'active' && (
+                  <div
+                    className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full opacity-40 blur-[80px]"
+                    style={{ background: 'radial-gradient(circle, rgba(255, 59, 71, 0.4), transparent 70%)' }}
+                  />
+                )}
+                <div className="relative flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-white/40">{task.source}</span>
+                      {task.status === 'active' && (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-200">
+                          <span className="relative flex h-1.5 w-1.5">
+                            <span className="absolute inline-flex h-full w-full animate-pulse-ring rounded-full bg-brand-500 opacity-60" />
+                            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-500" />
+                          </span>
+                          Recording
+                        </span>
+                      )}
+                    </div>
+                    <h1 className="mt-1.5 text-balance text-2xl font-semibold tracking-tight text-white">{task.title}</h1>
+                    {task.description && <p className="mt-2 max-w-3xl text-sm leading-6 text-white/50">{task.description}</p>}
+                  </div>
+                </div>
+                <motion.div
+                  variants={metricsV}
+                  initial="hidden"
+                  animate="show"
+                  className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3"
+                >
+                  <motion.div variants={metricV}>
+                    <Metric label="Status" value={task.status} accent={task.status === 'active'} />
+                  </motion.div>
+                  <motion.div variants={metricV}>
+                    <Metric label="Duration" value={duration(task, now)} />
+                  </motion.div>
+                  <motion.div variants={metricV}>
+                    <Metric label="Created" value={new Date(task.createdAt).toLocaleString()} />
+                  </motion.div>
+                </motion.div>
+              </header>
+
+              {/* Documentation Container */}
+              <div className="relative min-h-0 flex-1 overflow-y-auto">
+                {isGenerating ? (
+                  <SkeletonDocument />
+                ) : documentation ? (
+                  <Documentation documentation={documentation} />
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center p-8 text-center">
+                    <div className="relative mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500/20 to-brand-600/10 ring-1 ring-brand-500/20">
+                      <BookOpenTextIcon className="h-6 w-6 text-brand-300" />
+                      <div className="absolute inset-0 -z-10 rounded-2xl bg-brand-500/30 blur-xl" />
+                    </div>
+                    <h2 className="text-balance text-xl font-semibold tracking-tight text-white">
+                      No documentation generated yet
+                    </h2>
+                    <p className="mt-3 max-w-md text-sm leading-6 text-white/50">
+                      TaskFlow continuously captures activity and creates roll-ups in your sidebar timeline. Click any event on the left to inspect its summary, or generate documentation for this task.
+                    </p>
+                    <motion.button
+                      type="button"
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="btn-primary mt-6"
+                      onClick={() => void generateDocumentation(task.id)}
+                    >
+                      <SparklesIcon className="h-4 w-4" />
+                      Generate Documentation
+                    </motion.button>
+                  </div>
+                )}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -252,8 +182,6 @@ export default function ActiveTask({ task }: { task: Task }) {
   )
 }
 
-
-
 function Metric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div
@@ -261,7 +189,7 @@ function Metric({ label, value, accent }: { label: string; value: string; accent
         accent ? 'border-brand-500/30 bg-brand-500/[0.06]' : 'border-white/[0.06] bg-white/[0.015]'
       }`}
     >
-      <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/40">{label}</p>
+      <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-white/40">{label}</p>
       <p className={`mt-1 text-sm font-semibold capitalize ${accent ? 'text-brand-200' : 'text-white/85'}`}>{value}</p>
     </div>
   )

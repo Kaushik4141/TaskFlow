@@ -4,12 +4,13 @@ import { differenceInSeconds, format, formatDistanceStrict, isToday, isYesterday
 import { CircleCheckIcon, LoaderCircleIcon, LayoutListIcon, PlusIcon, ArrowDownUpIcon, SearchIcon, XIcon } from '@animateicons/react/lucide'
 import { useTaskStore } from '../stores/taskStore'
 import { SkeletonCard } from './Skeleton'
+import TaskFlowLogo from './TaskFlowLogo'
 import { HoverCard, modalVariants, motion, selectionSpring, useStaggerContainer, useStaggerItem } from '../lib/motion'
 import type { Integration, Task, Ticket } from '../types'
 
 const sourceOptions: Task['source'][] = ['manual', 'jira', 'github', 'linear']
 
-export default function TaskList() {
+export default function TaskList({ onSelectTimeline }: { onSelectTimeline?: () => void } = {}) {
   const {
     tasks,
     selectedTask,
@@ -100,7 +101,10 @@ export default function TaskList() {
       <div className="border-b border-white/[0.06] p-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-white/40">TaskFlow</p>
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <TaskFlowLogo size="xs" showWordmark={false} />
+              <p className="font-display text-[11px] font-medium uppercase tracking-[0.1em] text-white/50">TaskFlow</p>
+            </div>
             <h1 className="text-lg font-semibold tracking-tight text-white">Tasks</h1>
           </div>
           <motion.button
@@ -140,7 +144,10 @@ export default function TaskList() {
                   task={task}
                   selected={selectedTask?.id === task.id}
                   eventCount={selectedTask?.id === task.id ? events.length : 0}
-                  onClick={() => void selectTask(task)}
+                  onClick={() => {
+                    void selectTask(task)
+                    onSelectTimeline?.()
+                  }}
                 />
               ))}
             </TaskGroup>
@@ -205,7 +212,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
 function TaskGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <section className="mb-5">
-      <h2 className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/35">{label}</h2>
+      <h2 className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-white/35">{label}</h2>
       <div className="space-y-1.5">{children}</div>
     </section>
   )
@@ -218,7 +225,7 @@ function ProviderBadge({ provider }: { provider: Ticket['provider'] }) {
       : provider === 'github'
         ? 'bg-white/10 text-white/80'
         : 'bg-violet-400/15 text-violet-200'
-  return <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase ${className}`}>{provider}</span>
+  return <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase ${className}`}>{provider}</span>
 }
 
 export function TaskRow({ task, selected, eventCount, onClick }: { task: Task; selected: boolean; eventCount: number; onClick: () => void }) {

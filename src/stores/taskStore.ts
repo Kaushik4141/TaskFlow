@@ -28,6 +28,8 @@ interface TaskStore {
   onboardingCompleted: boolean | null
   documentationHistory: Documentation[]
   rollups: Rollup[]
+  selectedRollupId: string | null
+  setSelectedRollupId: (id: string | null) => void
   setSettingsOpen: (settingsOpen: boolean) => void
   setSearchOpen: (searchOpen: boolean) => void
   fetchTasks: () => Promise<void>
@@ -100,9 +102,11 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   onboardingCompleted: null,
   documentationHistory: [],
   rollups: [],
+  selectedRollupId: null,
 
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setSearchOpen: (searchOpen) => set({ searchOpen }),
+  setSelectedRollupId: (selectedRollupId) => set({ selectedRollupId }),
 
   fetchTasks: async () => {
     const [tasks, activeTask] = await Promise.all([
@@ -127,6 +131,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         tasks: [task, ...state.tasks.map((item) => (item.status === 'active' ? { ...item, status: 'paused' as const } : item))],
         activeTask: task,
         selectedTask: task,
+        selectedRollupId: null,
         events: [],
         documentation: null,
       }))
@@ -173,7 +178,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   selectTask: async (task) => {
-    set({ selectedTask: task })
+    set({ selectedTask: task, selectedRollupId: null })
     await Promise.all([get().fetchEvents(task.id), get().fetchDocumentation(task.id), get().fetchRollups(task.id)])
   },
 

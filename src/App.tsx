@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { AnimatePresence } from 'framer-motion'
-import { ActivityIcon, SearchIcon as SearchIcon, SettingsIcon as SettingsIcon } from '@animateicons/react/lucide'
+import { ActivityIcon, LoaderCircleIcon, PauseIcon, PlayIcon, SearchIcon as SearchIcon, SettingsIcon as SettingsIcon } from '@animateicons/react/lucide'
 import ActiveTask from './components/ActiveTask'
 import AmbientBackground from './components/AmbientBackground'
 import KeyboardShortcutsHelp from './components/KeyboardShortcutsHelp'
@@ -10,6 +10,7 @@ import Search from './components/Search'
 import Settings from './components/Settings'
 import StatsPanel from './components/StatsPanel'
 import TaskList from './components/TaskList'
+import Timeline from './components/Timeline'
 import ToastContainer from './components/Toast'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { motion } from './lib/motion'
@@ -47,6 +48,7 @@ export default function App() {
   const {
     selectedTask,
     activeTask,
+    isGenerating,
     fetchTasks,
     settingsOpen,
     setSettingsOpen,
@@ -62,7 +64,19 @@ export default function App() {
   } = useTaskStore()
 
   const [helpOpen, setHelpOpen] = useState(false)
+  const [sidebarView, setSidebarView] = useState<'tasks' | 'timeline'>('tasks')
   const viewSwap = useViewSwap()
+
+  const prevTaskIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (selectedTask && selectedTask.id !== prevTaskIdRef.current) {
+      setSidebarView('timeline')
+      prevTaskIdRef.current = selectedTask.id
+    } else if (!selectedTask) {
+      setSidebarView('tasks')
+      prevTaskIdRef.current = null
+    }
+  }, [selectedTask])
 
   useEffect(() => {
     startTaskStoreListeners()
@@ -70,9 +84,13 @@ export default function App() {
     void checkOnboarding()
   }, [fetchTasks, checkOnboarding])
 
+  const isCapturing = activeTask !== null || selectedTask?.status === 'active'
+
   const handleToggleTask = useCallback(() => {
     if (activeTask) {
       void stopTask(activeTask.id)
+    } else if (selectedTask?.status === 'active') {
+      void stopTask(selectedTask.id)
     } else if (selectedTask) {
       void startTask(selectedTask.id)
     }
@@ -111,7 +129,78 @@ export default function App() {
     <div className="relative h-screen w-screen overflow-hidden rounded-2xl bg-transparent">
       <AmbientBackground />
       <main className="relative z-10 flex h-full flex-col text-white">
-        <WindowControls />
+        {/* Top-Right Header Region: Two stacked rows */}
+        <div className="absolute right-0 top-0 z-[60] flex flex-col items-end pointer-events-none">
+          {/* Row 1 (top): WindowControls only — draggable */}
+          <div
+            data-tauri-drag-region
+            className="pointer-events-auto flex h-8 items-center justify-end pr-1"
+          >
+            <WindowControls className="flex h-full items-center justify-end" />
+          </div>
+
+          {/* Row 2 (directly below Row 1): Settings toggle + Stop TaskFlow button — not draggable */}
+          <div
+            data-tauri-drag-region="false"
+            className="pointer-events-auto flex items-center justify-end gap-2 pr-2.5 pt-1"
+          >
+            <button
+              type="button"
+              aria-label={settingsOpen ? 'Close settings' : 'Open settings'}
+              title={settingsOpen ? 'Close settings' : 'Settings'}
+              className={`flex h-8 w-8 items-center justify-center rounded-xl transition-all ${
+                settingsOpen
+                  ? 'bg-brand-500/20 text-brand-200 ring-1 ring-brand-500/30 shadow-glow-sm'
+                  : 'border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white'
+              }`}
+              onClick={() => setSettingsOpen(!settingsOpen)}
+            >
+              <SettingsIcon className="h-4 w-4" />
+            </button>
+
+            {isCapturing ? (
+              <motion.button
+                type="button"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                disabled={isGenerating}
+                onClick={handleToggleTask}
+                title="Stop TaskFlow"
+                className="inline-flex h-8 items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/15 px-3 text-xs font-semibold text-rose-200 transition-all hover:bg-rose-500/25 hover:border-rose-500/40 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isGenerating ? (
+                  <LoaderCircleIcon className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <>
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-500" />
+                    </span>
+                    <PauseIcon className="h-3.5 w-3.5 text-rose-300" />
+                  </>
+                )}
+                <span>{isGenerating ? 'Generating...' : 'Stop TaskFlow'}</span>
+              </motion.button>
+            ) : (
+              <motion.button
+                type="button"
+                whileHover={{ scale: selectedTask && !isGenerating ? 1.02 : 1 }}
+                whileTap={{ scale: selectedTask && !isGenerating ? 0.98 : 1 }}
+                disabled={(!selectedTask && !activeTask) || isGenerating}
+                onClick={handleToggleTask}
+                title={selectedTask ? 'Start TaskFlow' : 'Select a task to start TaskFlow'}
+                className="inline-flex h-8 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-white/70 transition-all hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isGenerating ? (
+                  <LoaderCircleIcon className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <PlayIcon className="h-3.5 w-3.5 text-white/60" />
+                )}
+                <span>{isGenerating ? 'Generating...' : selectedTask ? 'Start TaskFlow' : 'Stop TaskFlow'}</span>
+              </motion.button>
+            )}
+          </div>
+        </div>
         {/* Main Content */}
         <div className="relative flex h-full min-h-0 flex-1 p-2 gap-2">
           {/* Sidebar */}
@@ -125,16 +214,13 @@ export default function App() {
             
             {/* Sidebar Header */}
             <div className="relative z-10 flex flex-col gap-5 p-5 pt-7">
-              <div className="flex items-center gap-2.5">
-                <div className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-600 shadow-glow-sm">
-                  <ActivityIcon className="h-4 w-4 text-white" />
-                </div>
-                <span className="text-[15px] font-bold tracking-tight text-white">
+              <div className="flex items-center">
+                <span className="font-display text-[15px] font-semibold tracking-tight text-white select-none">
                   TaskFlow
                 </span>
               </div>
               
-              <div className="flex flex-col gap-1">
+              <div>
                 <button
                   type="button"
                   className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-white/60 transition-colors hover:bg-white/[0.04] hover:text-white/90"
@@ -148,29 +234,27 @@ export default function App() {
                     ⌘K
                   </kbd>
                 </button>
-                <button
-                  type="button"
-                  className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
-                    settingsOpen
-                      ? 'bg-brand-500/15 text-brand-200'
-                      : 'text-white/60 hover:bg-white/[0.04] hover:text-white/90'
-                  }`}
-                  onClick={() => setSettingsOpen(!settingsOpen)}
-                >
-                  <SettingsIcon className="h-[18px] w-[18px]" />
-                  <span>Settings</span>
-                </button>
               </div>
             </div>
             <div className="relative z-10 min-h-0 flex-1">
               <AnimatePresence mode="wait">
-                <motion.div key={settingsOpen ? 'settings' : 'tasks'} className="h-full" {...viewSwap}>
-                  {settingsOpen ? <Settings /> : <TaskList />}
+                <motion.div
+                  key={settingsOpen ? 'settings' : sidebarView === 'timeline' && selectedTask ? 'timeline' : 'tasks'}
+                  className="h-full"
+                  {...viewSwap}
+                >
+                  {settingsOpen ? (
+                    <Settings />
+                  ) : sidebarView === 'timeline' && selectedTask ? (
+                    <Timeline taskId={selectedTask.id} onBack={() => setSidebarView('tasks')} />
+                  ) : (
+                    <TaskList onSelectTimeline={() => setSidebarView('timeline')} />
+                  )}
                 </motion.div>
               </AnimatePresence>
             </div>
             <AnimatePresence>
-              {!settingsOpen && (
+              {!settingsOpen && sidebarView === 'tasks' && (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -197,7 +281,7 @@ export default function App() {
           {/* Main Workspace */}
           <div className="relative min-w-0 flex-1 rounded-xl bg-noir-950/80 overflow-hidden border border-white/[0.04]">
             {/* Drag Region for Main Area */}
-            <div data-tauri-drag-region className="absolute left-0 right-0 top-0 z-[40] h-8 cursor-grab active:cursor-grabbing" />
+            <div data-tauri-drag-region className="absolute left-0 right-48 top-0 z-[40] h-8 cursor-grab active:cursor-grabbing" />
             <AnimatePresence mode="wait">
               {selectedTask ? (
                 <motion.div

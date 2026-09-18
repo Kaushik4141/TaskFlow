@@ -4,9 +4,19 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'Aptos', 'Segoe UI Variable', 'Segoe UI', 'system-ui', 'sans-serif'],
-        display: ['Studio Feixen Sans', 'Inter', 'sans-serif'],
+        sans: ['Manrope', 'system-ui', 'sans-serif'],
+        display: ['Manrope', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'Cascadia Code', 'Consolas', 'monospace'],
+      },
+      fontWeight: {
+        normal: '500',
+        medium: '500',
+        semibold: '600',
+        bold: '600',
+      },
+      fontSize: {
+        xs: ['0.75rem', { lineHeight: '1.15rem', letterSpacing: '-0.005em' }],
+        sm: ['0.875rem', { lineHeight: '1.35rem', letterSpacing: '-0.01em' }],
       },
       colors: {
         noir: {

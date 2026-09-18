@@ -1,8 +1,9 @@
 import { Dispatch, FormEvent, ReactNode, SetStateAction, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { invoke } from '@tauri-apps/api/core'
-import { BrainIcon, CircleCheckIcon, BookOpenTextIcon, FolderOpenIcon, GitBranchIcon, KeyRoundIcon, LinkIcon, CodeXmlIcon, ShieldCheckIcon, Trash2Icon, XIcon, ZapIcon, SparklesIcon, EyeIcon } from '@animateicons/react/lucide'
+import { BrainIcon, CircleCheckIcon, BookOpenTextIcon, FolderOpenIcon, GitBranchIcon, KeyRoundIcon, LinkIcon, CodeXmlIcon, ShieldCheckIcon, Trash2Icon, XIcon, ZapIcon, SparklesIcon, EyeIcon, TerminalIcon, SettingsIcon, SunIcon } from '@animateicons/react/lucide'
 import SummarySettings from './SummarySettings'
+import EventFeed from './EventFeed'
 import { CandidateCard } from './CandidateCard'
 import { useTaskStore } from '../stores/taskStore'
 import { useProjectCandidates } from '../hooks/useProjectCandidates'
@@ -19,7 +20,7 @@ export default function Settings() {
   const { integrations, deleteIntegration, updatePrivacySettings, updateCaptureWorkflow, selectedTask, documentation } = useTaskStore()
   const [connecting, setConnecting] = useState<Integration['provider'] | null>(null)
   const [showDeepCapture, setShowDeepCapture] = useState(false)
-  const [activeSection, setActiveSection] = useState<'capture' | 'integrations' | 'summary' | 'appearance'>('capture')
+  const [activeSection, setActiveSection] = useState<'capture' | 'integrations' | 'summary' | 'appearance' | 'developer'>('capture')
   const [privacyLoaded, setPrivacyLoaded] = useState(false)
   const [privacy, setPrivacy] = useState({
     windowTitles: true,
@@ -209,7 +210,7 @@ export default function Settings() {
     { id: 'capture' as const, icon: <EyeIcon className="h-4 w-4" />, label: 'Capture' },
     { id: 'integrations' as const, icon: <LinkIcon className="h-4 w-4" />, label: 'Integrations' },
     { id: 'summary' as const, icon: <SparklesIcon className="h-4 w-4" />, label: 'Summary' },
-    { id: 'appearance' as const, icon: <EyeIcon className="h-4 w-4" />, label: 'Theme' },
+    { id: 'appearance' as const, icon: <SunIcon className="h-4 w-4" />, label: 'Theme' },
   ]
 
   return (
@@ -219,25 +220,39 @@ export default function Settings() {
         <h1 className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-white/50">Settings</h1>
         <div className="flex gap-1 rounded-lg bg-white/[0.04] p-0.5">
           {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              className={`relative z-10 flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors ${
-                activeSection === tab.id ? 'text-white' : 'text-white/40 hover:text-white/70'
-              }`}
-              onClick={() => setActiveSection(tab.id)}
-              type="button"
-              title={tab.label}
-            >
-              {activeSection === tab.id && (
-                <motion.div
-                  layoutId="settings-tab"
-                  transition={selectionSpring}
-                  className="absolute inset-0 -z-10 rounded-md bg-white/[0.08]"
-                />
-              )}
-              {tab.icon}
-              <span className="tab-label">{tab.label}</span>
-            </button>
+            <div key={tab.id} className="group relative flex flex-1">
+              <button
+                className={`relative z-10 flex w-full items-center justify-center py-2 rounded-md transition-colors ${
+                  activeSection === tab.id ? 'text-white' : 'text-white/40 hover:text-white/70'
+                }`}
+                onClick={() => setActiveSection(tab.id)}
+                type="button"
+                aria-label={tab.label}
+                title={tab.label}
+              >
+                {activeSection === tab.id && (
+                  <motion.div
+                    layoutId="settings-tab"
+                    transition={selectionSpring}
+                    className="absolute inset-0 -z-10 rounded-md bg-white/[0.08]"
+                  />
+                )}
+                {activeSection === tab.id && (
+                  <motion.span
+                    layoutId="settings-tab-underline"
+                    transition={selectionSpring}
+                    className="absolute -bottom-0.5 left-2.5 right-2.5 h-0.5 rounded-full bg-brand-400 shadow-glow-sm"
+                  />
+                )}
+                {tab.icon}
+              </button>
+              {/* Tooltip on hover */}
+              <div className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 z-50 pt-1 opacity-0 scale-95 transition-all duration-150 group-hover:opacity-100 group-hover:scale-100">
+                <div className="whitespace-nowrap rounded-md border border-white/10 bg-noir-900/95 px-2 py-0.5 text-[10px] font-medium text-white shadow-elevated backdrop-blur-md">
+                  {tab.label}
+                </div>
+              </div>
+            </div>
           ))}
         </div>
       </div>
@@ -271,6 +286,7 @@ export default function Settings() {
                 saveObsidianSettings={saveObsidianSettings}
                 syncCurrentToObsidian={syncCurrentToObsidian}
                 setShowDeepCapture={setShowDeepCapture}
+                onOpenDeveloper={() => setActiveSection('developer')}
               />
             </motion.div>
           ) : activeSection === 'integrations' ? (
@@ -293,7 +309,7 @@ export default function Settings() {
             >
               <SummarySettings />
             </motion.div>
-          ) : (
+          ) : activeSection === 'appearance' ? (
             <motion.div
               key="appearance"
               initial={{ opacity: 0, y: 6 }}
@@ -302,6 +318,16 @@ export default function Settings() {
               transition={{ duration: 0.15 }}
             >
               <AppearanceSection />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="developer"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.15 }}
+            >
+              <DeveloperSection onBack={() => setActiveSection('capture')} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -321,6 +347,34 @@ export default function Settings() {
 /* Sections                                                          */
 /* ---------------------------------------------------------------- */
 
+function DeveloperSection({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-300 ring-1 ring-brand-500/20">
+            <SettingsIcon className="h-4 w-4" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold tracking-tight text-white">Developer Options</h2>
+            <p className="text-[11px] text-white/50">
+              Live raw event stream (last 50 events) and window telemetry
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onBack}
+          className="rounded-lg border border-white/10 px-2.5 py-1 text-xs text-white/60 hover:bg-white/5 hover:text-white transition-colors"
+        >
+          ← Settings
+        </button>
+      </div>
+      <EventFeed />
+    </div>
+  )
+}
+
 function CaptureSection({
   workflow,
   setWorkflow,
@@ -339,6 +393,7 @@ function CaptureSection({
   saveObsidianSettings,
   syncCurrentToObsidian,
   setShowDeepCapture,
+  onOpenDeveloper,
 }: {
   workflow: { mode: 'manual' | 'continuous' | 'selective'; selectiveApps: string; retentionHours: number }
   setWorkflow: Dispatch<SetStateAction<typeof workflow>>
@@ -357,6 +412,7 @@ function CaptureSection({
   saveObsidianSettings: () => void
   syncCurrentToObsidian: () => void
   setShowDeepCapture: (show: boolean) => void
+  onOpenDeveloper: () => void
 }) {
   // Vault health is a transient, on-demand read — it belongs to this panel's
   // lifetime, not to the settings that get persisted.
@@ -421,31 +477,6 @@ function CaptureSection({
         </div>
       </section>
 
-      {/* Memory Tree — collapsible */}
-      <CollapsibleSection label="Memory Tree" defaultOpen={workflow.mode === 'selective'}>
-        <label className="block">
-          <span className="mb-1 block text-xs text-white/50">Selective apps (one per line)</span>
-          <textarea
-            className="textarea h-20 text-xs"
-            value={workflow.selectiveApps}
-            onChange={(e) => setWorkflow((s) => ({ ...s, selectiveApps: e.target.value }))}
-            disabled={workflow.mode !== 'selective'}
-          />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs text-white/50">Raw capture retention</span>
-          <select
-            className="select text-xs"
-            value={workflow.retentionHours}
-            onChange={(e) => setWorkflow((s) => ({ ...s, retentionHours: Number(e.target.value) }))}
-          >
-            <option value={24}>24 hours</option>
-            <option value={72}>72 hours</option>
-            <option value={168}>7 days</option>
-          </select>
-        </label>
-      </CollapsibleSection>
-
       {/* Workstream Roll-ups — collapsible */}
       <CollapsibleSection label="Workstream Roll-ups" defaultOpen={rollup.enabled}>
         <Toggle
@@ -473,122 +504,184 @@ function CaptureSection({
         </p>
       </CollapsibleSection>
 
-      {/* Known Projects — collapsible */}
-      <CollapsibleSection
-        label="Known Projects"
-        defaultOpen={projects.trim().length > 0}
-        attention={readyCount}
-      >
-        <ProjectCandidates
-          candidates={queue.candidates}
-          busyKey={queue.busyKey}
-          error={queue.error}
-          onApprove={(matchKey, displayName) => void confirmCandidate(matchKey, displayName)}
-          onReject={(matchKey) => void queue.reject(matchKey)}
-        />
-        <label className="block">
-          <span className="mb-1 block text-xs text-white/50">Your projects (one per line)</span>
-          <textarea
-            className="textarea h-20 text-xs"
-            value={projects}
-            placeholder={'TaskFlow\nSkillForge\ndatavex3'}
-            onChange={(e) => setProjects(e.target.value)}
-          />
-        </label>
-        <p className="text-[11px] leading-4 text-white/35">
-          Activity matching one of these names becomes a workstream node in the vault
-          (Projects/&lt;name&gt;). Everything else routes to Inbox — without this list, a window-title
-          guess creates junk project pages.
-        </p>
-      </CollapsibleSection>
-
-      {/* Obsidian Vault — collapsible */}
-      <CollapsibleSection label="Obsidian Vault" defaultOpen={obsidian.enabled}>
-        <Toggle checked={obsidian.enabled} label="Sync to Obsidian" onChange={(v) => setObsidian((s) => ({ ...s, enabled: v }))} />
-        <label className="block">
-          <span className="mb-1 block text-xs text-white/50">Vault path</span>
-          <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/30 px-2.5 py-2 transition-all focus-within:border-brand-500/40">
-            <FolderOpenIcon className="h-3.5 w-3.5 shrink-0 text-white/35" />
-            <input
-              className="min-w-0 flex-1 bg-transparent text-xs text-white outline-none placeholder:text-white/25"
-              value={obsidian.vaultPath}
-              placeholder="~/Obsidian/Vault or C:\\Users\\you\\Obsidian Vault"
-              onChange={(e) => setObsidian((s) => ({ ...s, vaultPath: e.target.value }))}
-            />
-          </div>
-        </label>
-        <div className="grid grid-cols-3 gap-1.5">
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.98 }}
-            className="btn-primary text-xs"
-            onClick={() => void saveObsidianSettings()}
-          >
-            Save
-          </motion.button>
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.98 }}
-            className="btn-ghost text-xs"
-            onClick={() => void syncCurrentToObsidian()}
-          >
-            Sync Now
-          </motion.button>
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.98 }}
-            className="btn-ghost text-xs disabled:opacity-40"
-            disabled={linting}
-            onClick={() => void checkVaultHealth()}
-          >
-            {linting ? 'Checking…' : 'Check Health'}
-          </motion.button>
+      {/* Primary Group: Workspace */}
+      <div className="space-y-3 pt-1">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-brand-300">Workspace</span>
+          <div className="h-px flex-1 bg-white/[0.06]" />
         </div>
-        {obsidianStatus && (
-          <p className="rounded-lg bg-black/20 p-2 text-[11px] leading-4 text-white/55">{obsidianStatus}</p>
-        )}
-        {lint && <VaultHealth report={lint} expanded={lintExpanded} onToggle={() => setLintExpanded((v) => !v)} />}
-      </CollapsibleSection>
 
-      {/* Privacy — collapsible */}
-      <CollapsibleSection label="Privacy">
-        <Toggle checked={privacy.windowTitles} label="Window titles" onChange={(v) => setPrivacy((s) => ({ ...s, windowTitles: v }))} />
-        <Toggle checked={privacy.clipboard} label="Clipboard" onChange={(v) => setPrivacy((s) => ({ ...s, clipboard: v }))} />
-        <Toggle
-          checked={privacy.accessibility}
-          label="Screen text (accessibility)"
-          onChange={(v) => {
-            setPrivacy((s) => ({ ...s, accessibility: v }))
-            if (v && localStorage.getItem('taskflow.deepCaptureOnboarded') !== 'true') {
-              setShowDeepCapture(true)
-            }
-          }}
-        />
-        {/* OCR is a strict sub-mode of screen text: window_monitor.rs gates the
-            whole deep-capture path on capture_screen_text, so this control is a
-            no-op when the parent is off. Nested, and hidden when inapplicable. */}
-        {privacy.accessibility && (
-          <div className="ml-3 space-y-1 border-l border-white/[0.08] pl-3">
-            <Toggle
-              checked={ocrFallback}
-              label="Read GPU terminals (OCR fallback)"
-              onChange={setOcrFallback}
+        {/* Memory Tree — collapsible (prominent) */}
+        <CollapsibleSection label="Memory Tree" defaultOpen={true}>
+          <label className="block">
+            <span className="mb-1 block text-xs text-white/50">Selective apps (one per line)</span>
+            <textarea
+              className="textarea h-20 text-xs"
+              value={workflow.selectiveApps}
+              onChange={(e) => setWorkflow((s) => ({ ...s, selectiveApps: e.target.value }))}
+              disabled={workflow.mode !== 'selective'}
             />
-            <p className="text-[11px] leading-4 text-white/35">
-              For windows that expose no readable text, like Warp or WezTerm. Pixels are read in
-              memory and never written to disk.
-            </p>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs text-white/50">Raw capture retention</span>
+            <select
+              className="select text-xs"
+              value={workflow.retentionHours}
+              onChange={(e) => setWorkflow((s) => ({ ...s, retentionHours: Number(e.target.value) }))}
+            >
+              <option value={24}>24 hours</option>
+              <option value={72}>72 hours</option>
+              <option value={168}>7 days</option>
+            </select>
+          </label>
+        </CollapsibleSection>
+
+        {/* Known Projects — collapsible (prominent) */}
+        <CollapsibleSection
+          label="Known Projects"
+          defaultOpen={true}
+          attention={readyCount}
+        >
+          <ProjectCandidates
+            candidates={queue.candidates}
+            busyKey={queue.busyKey}
+            error={queue.error}
+            onApprove={(matchKey, displayName) => void confirmCandidate(matchKey, displayName)}
+            onReject={(matchKey) => void queue.reject(matchKey)}
+          />
+          <label className="block">
+            <span className="mb-1 block text-xs text-white/50">Your projects (one per line)</span>
+            <textarea
+              className="textarea h-20 text-xs"
+              value={projects}
+              placeholder={'TaskFlow\nSkillForge\ndatavex3'}
+              onChange={(e) => setProjects(e.target.value)}
+            />
+          </label>
+          <p className="text-[11px] leading-4 text-white/35">
+            Activity matching one of these names becomes a workstream node in the vault
+            (Projects/&lt;name&gt;). Everything else routes to Inbox — without this list, a window-title
+            guess creates junk project pages.
+          </p>
+        </CollapsibleSection>
+      </div>
+
+      {/* Secondary Group: More Settings (Obsidian Vault & Privacy) */}
+      <div className="pt-2">
+        <CollapsibleSection label="More Settings" defaultOpen={false}>
+          <div className="space-y-4 pt-1 text-xs text-white/70">
+            {/* Obsidian Vault */}
+            <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3 space-y-3">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-white/50">Obsidian Vault</span>
+              <Toggle checked={obsidian.enabled} label="Sync to Obsidian" onChange={(v) => setObsidian((s) => ({ ...s, enabled: v }))} />
+              <label className="block">
+                <span className="mb-1 block text-xs text-white/50">Vault path</span>
+                <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/30 px-2.5 py-2 transition-all focus-within:border-brand-500/40">
+                  <FolderOpenIcon className="h-3.5 w-3.5 shrink-0 text-white/35" />
+                  <input
+                    className="min-w-0 flex-1 bg-transparent text-xs text-white outline-none placeholder:text-white/25"
+                    value={obsidian.vaultPath}
+                    placeholder="~/Obsidian/Vault or C:\\Users\\you\\Obsidian Vault"
+                    onChange={(e) => setObsidian((s) => ({ ...s, vaultPath: e.target.value }))}
+                  />
+                </div>
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.98 }}
+                  className="btn-primary text-xs"
+                  onClick={() => void saveObsidianSettings()}
+                >
+                  Save
+                </motion.button>
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.98 }}
+                  className="btn-ghost text-xs"
+                  onClick={() => void syncCurrentToObsidian()}
+                >
+                  Sync Now
+                </motion.button>
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.98 }}
+                  className="btn-ghost text-xs disabled:opacity-40"
+                  disabled={linting}
+                  onClick={() => void checkVaultHealth()}
+                >
+                  {linting ? 'Checking…' : 'Check Health'}
+                </motion.button>
+              </div>
+              {obsidianStatus && (
+                <p className="rounded-lg bg-black/20 p-2 text-[11px] leading-4 text-white/55">{obsidianStatus}</p>
+              )}
+              {lint && <VaultHealth report={lint} expanded={lintExpanded} onToggle={() => setLintExpanded((v) => !v)} />}
+            </div>
+
+            {/* Privacy */}
+            <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3 space-y-3">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-white/50">Privacy</span>
+              <Toggle checked={privacy.windowTitles} label="Window titles" onChange={(v) => setPrivacy((s) => ({ ...s, windowTitles: v }))} />
+              <Toggle checked={privacy.clipboard} label="Clipboard" onChange={(v) => setPrivacy((s) => ({ ...s, clipboard: v }))} />
+              <Toggle
+                checked={privacy.accessibility}
+                label="Screen text (accessibility)"
+                onChange={(v) => {
+                  setPrivacy((s) => ({ ...s, accessibility: v }))
+                  if (v && localStorage.getItem('taskflow.deepCaptureOnboarded') !== 'true') {
+                    setShowDeepCapture(true)
+                  }
+                }}
+              />
+              {privacy.accessibility && (
+                <div className="ml-3 space-y-1 border-l border-white/[0.08] pl-3">
+                  <Toggle
+                    checked={ocrFallback}
+                    label="Read GPU terminals (OCR fallback)"
+                    onChange={setOcrFallback}
+                  />
+                  <p className="text-[11px] leading-4 text-white/35">
+                    For windows that expose no readable text, like Warp or WezTerm. Pixels are read in
+                    memory and never written to disk.
+                  </p>
+                </div>
+              )}
+              <label className="block">
+                <span className="mb-1 block text-xs text-white/50">Excluded apps</span>
+                <textarea className="textarea h-16 text-xs" value={privacy.excludedApps} onChange={(e) => setPrivacy((s) => ({ ...s, excludedApps: e.target.value }))} />
+              </label>
+              <p className="flex items-center gap-1.5 text-[11px] text-white/35">
+                <ShieldCheckIcon className="h-3 w-3 text-brand-400" />
+                All data stays on your device.
+              </p>
+            </div>
           </div>
-        )}
-        <label className="block">
-          <span className="mb-1 block text-xs text-white/50">Excluded apps</span>
-          <textarea className="textarea h-16 text-xs" value={privacy.excludedApps} onChange={(e) => setPrivacy((s) => ({ ...s, excludedApps: e.target.value }))} />
-        </label>
-        <p className="flex items-center gap-1.5 text-[11px] text-white/35">
-          <ShieldCheckIcon className="h-3 w-3 text-brand-400" />
-          All data stays on your device.
-        </p>
-      </CollapsibleSection>
+        </CollapsibleSection>
+      </div>
+
+      {/* Developer Options Banner in Capture Section */}
+      <div className="rounded-xl border border-brand-500/30 bg-gradient-to-r from-brand-500/10 to-brand-500/5 p-3.5 mt-4 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500/20 text-brand-300 ring-1 ring-brand-500/30">
+              <TerminalIcon className="h-4 w-4" />
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-white">Developer Options</h3>
+              <p className="text-[11px] text-white/50">Live raw event stream & telemetry</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenDeveloper}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white shadow-glow-sm hover:bg-brand-400 transition-all shrink-0"
+          >
+            <span>Open Feed</span>
+            <span>→</span>
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1143,7 +1236,7 @@ function ProviderIcon({ provider, className }: { provider: Integration['provider
   if (provider === 'github') {
     return <GitBranchIcon className={className} />
   }
-  return <span className={`inline-flex items-center justify-center rounded bg-current/10 font-bold ${className}`}>{provider[0].toUpperCase()}</span>
+  return <span className={`inline-flex items-center justify-center rounded bg-current/10 font-semibold ${className}`}>{provider[0].toUpperCase()}</span>
 }
 
 function helpUrl(provider: Integration['provider']) {
