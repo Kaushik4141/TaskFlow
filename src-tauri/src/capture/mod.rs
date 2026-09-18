@@ -5,6 +5,7 @@ pub mod privacy;
 pub mod types;
 pub mod url_extractor;
 pub mod window_monitor;
+pub mod work_classifier;
 
 #[cfg(target_os = "linux")]
 pub mod linux_reader;
