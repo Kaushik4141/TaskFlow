@@ -42,6 +42,11 @@ CREATE POLICY "Service role full access on vault_notes"
 ON vault_notes FOR ALL TO service_role
 USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Anon client access on vault_notes" ON vault_notes;
+CREATE POLICY "Anon client access on vault_notes"
+ON vault_notes FOR ALL TO anon
+USING (true) WITH CHECK (true);
+
 CREATE INDEX IF NOT EXISTS vault_notes_path_idx ON vault_notes(path);
 CREATE INDEX IF NOT EXISTS vault_notes_embedding_idx 
 ON vault_notes USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
@@ -78,6 +83,11 @@ CREATE POLICY "Service role full access on cloud_rollups"
 ON cloud_rollups FOR ALL TO service_role
 USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Anon client access on cloud_rollups" ON cloud_rollups;
+CREATE POLICY "Anon client access on cloud_rollups"
+ON cloud_rollups FOR ALL TO anon
+USING (true) WITH CHECK (true);
+
 CREATE INDEX IF NOT EXISTS cloud_rollups_project_idx ON cloud_rollups(project_slug);
 CREATE INDEX IF NOT EXISTS cloud_rollups_window_idx ON cloud_rollups(window_start, window_end);
 CREATE INDEX IF NOT EXISTS cloud_rollups_embedding_idx 
@@ -110,6 +120,11 @@ USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 DROP POLICY IF EXISTS "Service role full access on cloud_graph_edges" ON cloud_graph_edges;
 CREATE POLICY "Service role full access on cloud_graph_edges"
 ON cloud_graph_edges FOR ALL TO service_role
+USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Anon client access on cloud_graph_edges" ON cloud_graph_edges;
+CREATE POLICY "Anon client access on cloud_graph_edges"
+ON cloud_graph_edges FOR ALL TO anon
 USING (true) WITH CHECK (true);
 
 CREATE INDEX IF NOT EXISTS cloud_graph_edges_source_idx ON cloud_graph_edges(source_entity, time_bucket, weight DESC);
