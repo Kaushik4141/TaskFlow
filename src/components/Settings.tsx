@@ -510,7 +510,7 @@ function CloudSection() {
         {
           mcpServers: {
             taskflow: {
-              url: `http://localhost:8765/sse?user_id=${effectiveUserId}`,
+              url: `https://taskflow-mcp-brain.onrender.com/sse?user_id=${effectiveUserId}`,
             },
           },
         },
@@ -530,6 +530,7 @@ brain = CloudMemory(
 # Sub-15ms Scoped Graph Memory Query:
 ctx = brain.query("OAuth token bug", project="TaskFlow")
 print(ctx["context_summary"])`
+    } else {
       const filterUserPayload = effectiveUserId ? `, "filter_user_id": "${effectiveUserId}"` : ''
       return `curl -s -X POST "${effectiveUrl}/rest/v1/rpc/query_cloud_memory" \\
   -H "apikey: ${effectiveKey}" \\
