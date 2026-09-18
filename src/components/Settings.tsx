@@ -1,14 +1,15 @@
 import { Dispatch, FormEvent, ReactNode, SetStateAction, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { invoke } from '@tauri-apps/api/core'
-import { BrainIcon, CircleCheckIcon, BookOpenTextIcon, FolderOpenIcon, GitBranchIcon, KeyRoundIcon, LinkIcon, CodeXmlIcon, ShieldCheckIcon, Trash2Icon, XIcon, ZapIcon, SparklesIcon, EyeIcon, TerminalIcon, SettingsIcon, SunIcon } from '@animateicons/react/lucide'
+import { BrainIcon, CircleCheckIcon, BookOpenTextIcon, FolderOpenIcon, GitBranchIcon, KeyRoundIcon, LinkIcon, CodeXmlIcon, ShieldCheckIcon, Trash2Icon, XIcon, ZapIcon, SparklesIcon, EyeIcon, TerminalIcon, SettingsIcon, SunIcon, CopyIcon, CheckIcon, UserIcon } from '@animateicons/react/lucide'
 import SummarySettings from './SummarySettings'
 import EventFeed from './EventFeed'
 import { CandidateCard } from './CandidateCard'
 import { useTaskStore } from '../stores/taskStore'
+import { useToastStore } from '../stores/toastStore'
 import { useProjectCandidates } from '../hooks/useProjectCandidates'
 import { selectionSpring } from '../lib/motion'
-import type { Integration, LintReport, ProjectCandidate } from '../types'
+import type { Integration, LintReport, ProjectCandidate, CloudStatus } from '../types'
 
 const providers: Array<{ id: Integration['provider']; label: string; color: string }> = [
   { id: 'jira', label: 'Jira', color: 'text-sky-300' },
@@ -20,7 +21,7 @@ export default function Settings() {
   const { integrations, deleteIntegration, updatePrivacySettings, updateCaptureWorkflow, selectedTask, documentation } = useTaskStore()
   const [connecting, setConnecting] = useState<Integration['provider'] | null>(null)
   const [showDeepCapture, setShowDeepCapture] = useState(false)
-  const [activeSection, setActiveSection] = useState<'capture' | 'integrations' | 'summary' | 'appearance' | 'developer'>('capture')
+  const [activeSection, setActiveSection] = useState<'capture' | 'integrations' | 'summary' | 'cloud' | 'appearance' | 'developer'>('capture')
   const [privacyLoaded, setPrivacyLoaded] = useState(false)
   const [privacy, setPrivacy] = useState({
     windowTitles: true,
@@ -210,6 +211,7 @@ export default function Settings() {
     { id: 'capture' as const, icon: <EyeIcon className="h-4 w-4" />, label: 'Capture' },
     { id: 'integrations' as const, icon: <LinkIcon className="h-4 w-4" />, label: 'Integrations' },
     { id: 'summary' as const, icon: <SparklesIcon className="h-4 w-4" />, label: 'Summary' },
+    { id: 'cloud' as const, icon: <BrainIcon className="h-4 w-4" />, label: 'Cloud & MCP' },
     { id: 'appearance' as const, icon: <SunIcon className="h-4 w-4" />, label: 'Theme' },
   ]
 
@@ -309,6 +311,16 @@ export default function Settings() {
             >
               <SummarySettings />
             </motion.div>
+          ) : activeSection === 'cloud' ? (
+            <motion.div
+              key="cloud"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.15 }}
+            >
+              <CloudSection />
+            </motion.div>
           ) : activeSection === 'appearance' ? (
             <motion.div
               key="appearance"
@@ -346,6 +358,454 @@ export default function Settings() {
 /* ---------------------------------------------------------------- */
 /* Sections                                                          */
 /* ---------------------------------------------------------------- */
+
+function CloudSection() {
+  const { addToast } = useToastStore()
+  const [status, setStatus] = useState<CloudStatus>({
+    configured: false,
+    supabaseUrl: 'https://cxarbuqzseembonxgpyw.supabase.co',
+    supabaseKey: '',
+    autoSync: true,
+    lastSync: null,
+    lastStats: null,
+    authenticated: false,
+    userId: null,
+    userEmail: null,
+    userName: null,
+    userAvatar: null,
+  })
+  const [saving, setSaving] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [urlInput, setUrlInput] = useState('')
+  const [keyInput, setKeyInput] = useState('')
+  const [autoSyncInput, setAutoSyncInput] = useState(true)
+  const [showKey, setShowKey] = useState(false)
+  const [manualUserId, setManualUserId] = useState('')
+  const [showManualAuth, setShowManualAuth] = useState(false)
+  const [activeMcpTab, setActiveMcpTab] = useState<'claude' | 'cursor' | 'hermes' | 'rpc'>('claude')
+  const [copied, setCopied] = useState(false)
+
+  const fetchStatus = async () => {
+    try {
+      const data = await invoke<CloudStatus>('get_cloud_status')
+      setStatus(data)
+      setUrlInput(data.supabaseUrl || 'https://cxarbuqzseembonxgpyw.supabase.co')
+      setKeyInput(data.supabaseKey || '')
+      setAutoSyncInput(data.autoSync)
+      if (data.userId) setManualUserId(data.userId)
+    } catch (err) {
+      console.error('Failed to load cloud status:', err)
+    }
+  }
+
+  useEffect(() => {
+    void fetchStatus()
+  }, [])
+
+  const handleSaveSettings = async (e: FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      await invoke('save_cloud_settings', {
+        supabaseUrl: urlInput.trim(),
+        supabaseKey: keyInput.trim(),
+        autoSync: autoSyncInput,
+      })
+      if (manualUserId.trim() && !status.authenticated) {
+        await invoke('update_setting', {
+          key: 'supabase_user_id',
+          value: manualUserId.trim(),
+        })
+      }
+      await fetchStatus()
+      addToast('success', 'Cloud settings saved successfully.')
+    } catch (err) {
+      addToast('error', `Failed to save: ${err}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSyncNow = async () => {
+    setSyncing(true)
+    try {
+      const res = await invoke<any>('sync_cloud_now')
+      await fetchStatus()
+      const notes = res?.vault_notes_uploaded ?? 0
+      const rollups = res?.rollups_uploaded ?? 0
+      addToast('success', `Cloud sync complete! (${rollups} rollups, ${notes} notes mirrored)`)
+    } catch (err) {
+      addToast('error', `Cloud sync failed: ${err}`)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const handleGoogleLogin = async () => {
+    try {
+      const oauthUrl = await invoke<string>('get_google_oauth_url')
+      try {
+        const { open } = await import('@tauri-apps/plugin-shell')
+        await open(oauthUrl)
+      } catch {
+        window.open(oauthUrl, '_blank')
+      }
+      addToast('info', 'Opening browser for Google Sign-In...')
+
+      let attempts = 0
+      const interval = setInterval(async () => {
+        attempts++
+        try {
+          const current = await invoke<CloudStatus>('get_cloud_status')
+          if (current.authenticated) {
+            clearInterval(interval)
+            setStatus(current)
+            addToast('success', `Signed in as ${current.userName || current.userEmail}!`)
+          }
+        } catch {
+          // ignore
+        }
+        if (attempts >= 30) clearInterval(interval)
+      }, 2000)
+    } catch (err) {
+      addToast('error', `Login initialization failed: ${err}`)
+    }
+  }
+
+  const handleSignOut = async () => {
+    try {
+      await invoke('sign_out_cloud')
+      await fetchStatus()
+      addToast('info', 'Signed out of TaskFlow Cloud.')
+    } catch (err) {
+      addToast('error', `Sign out failed: ${err}`)
+    }
+  }
+
+  const effectiveUserId = status.userId || manualUserId || 'default_user'
+  const effectiveUrl = status.supabaseUrl || urlInput || 'https://cxarbuqzseembonxgpyw.supabase.co'
+  const effectiveKey = status.supabaseKey || keyInput || 'sb_publishable_...'
+
+  const getMcpSnippet = () => {
+    if (activeMcpTab === 'claude') {
+      return JSON.stringify(
+        {
+          mcpServers: {
+            taskflow: {
+              command: 'python3',
+              args: ['/home/kaushi/Projects/TaskFlow/sidecar/mcp_server.py', '--user-id', effectiveUserId],
+              env: {
+                SUPABASE_URL: effectiveUrl,
+                SUPABASE_KEY: effectiveKey,
+                TASKFLOW_USER_ID: effectiveUserId,
+              },
+            },
+          },
+        },
+        null,
+        2
+      )
+    } else if (activeMcpTab === 'cursor') {
+      return JSON.stringify(
+        {
+          mcpServers: {
+            taskflow: {
+              url: `http://localhost:8765/sse?user_id=${effectiveUserId}`,
+            },
+          },
+        },
+        null,
+        2
+      )
+    } else if (activeMcpTab === 'hermes') {
+      return `# In Hermes Agent / Cloud Container:
+from cloud_agent import CloudMemory
+
+brain = CloudMemory(
+    supabase_url="${effectiveUrl}",
+    supabase_key="${effectiveKey}",
+    user_id="${effectiveUserId}"
+)
+
+# Sub-15ms Scoped Graph Memory Query:
+ctx = brain.query("OAuth token bug", project="TaskFlow")
+print(ctx["context_summary"])`
+    } else {
+      return `curl -s -X POST "${effectiveUrl}/rest/v1/rpc/query_cloud_memory" \\
+  -H "apikey: ${effectiveKey}" \\
+  -H "Authorization: Bearer ${effectiveKey}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"match_limit": 5, "filter_project": "TaskFlow"}'`
+    }
+  }
+
+  const handleCopySnippet = async () => {
+    const text = getMcpSnippet()
+    try {
+      const { writeText } = await import('@tauri-apps/plugin-clipboard-manager')
+      await writeText(text)
+    } catch {
+      await navigator.clipboard.writeText(text)
+    }
+    setCopied(true)
+    addToast('success', 'MCP configuration copied to clipboard!')
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500/10 text-brand-300 ring-1 ring-brand-500/20">
+          <BrainIcon className="h-4 w-4" />
+        </div>
+        <div>
+          <h2 className="text-sm font-semibold tracking-tight text-white">24/7 Cloud Mirror & Agent Bridge</h2>
+          <p className="text-[11px] text-white/50">
+            Multi-tenant Supabase memory mirror with isolated database access and personal MCP endpoints.
+          </p>
+        </div>
+      </div>
+
+      {/* 1. User Authentication & Multi-Tenancy */}
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <UserIcon className="h-4 w-4 text-brand-300" />
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-white/70">User Identity & Multi-Tenancy</h3>
+          </div>
+          {status.authenticated ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-500/20">
+              <CheckIcon className="h-3 w-3" /> Verified Account
+            </span>
+          ) : (
+            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-400 border border-amber-500/20">
+              Unauthenticated (Local / Anon Mode)
+            </span>
+          )}
+        </div>
+
+        {status.authenticated ? (
+          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-noir-900/60 p-3">
+            <div className="flex items-center gap-3">
+              {status.userAvatar ? (
+                <img src={status.userAvatar} alt="avatar" className="h-10 w-10 rounded-full border border-white/20" />
+              ) : (
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-500/20 text-sm font-semibold text-brand-300 border border-brand-500/30">
+                  {status.userName ? status.userName[0].toUpperCase() : 'U'}
+                </div>
+              )}
+              <div>
+                <div className="text-xs font-semibold text-white">{status.userName || 'TaskFlow User'}</div>
+                <div className="text-[11px] text-white/50">{status.userEmail}</div>
+                <div className="mt-1 font-mono text-[10px] text-white/40">User ID: {status.userId}</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="rounded-lg border border-red-500/20 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              Sign Out
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-white/60">
+              Sign in with Google to isolate your activity memory under your personal account. Row Level Security (RLS) ensures only your agents can query your data.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                className="flex items-center gap-2.5 rounded-lg border border-white/15 bg-white/10 px-4 py-2 text-xs font-medium text-white hover:bg-white/15 transition-all shadow-sm active:scale-95"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                </svg>
+                Sign in with Google
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowManualAuth(!showManualAuth)}
+                className="text-[11px] text-white/40 hover:text-white/70 underline underline-offset-2"
+              >
+                {showManualAuth ? 'Hide Manual User ID' : 'Or set User ID manually'}
+              </button>
+            </div>
+
+            {showManualAuth && (
+              <div className="pt-2">
+                <label className="text-[11px] text-white/50 block mb-1">Custom User UUID (for headless/testing):</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 11111111-2222-3333-4444-555555555555"
+                  value={manualUserId}
+                  onChange={(e) => setManualUserId(e.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-noir-950/80 px-3 py-1.5 font-mono text-xs text-white placeholder:text-white/20 focus:border-brand-500/50 focus:outline-none"
+                />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 2. 24/7 Cloud Mirror Configuration */}
+      <form onSubmit={handleSaveSettings} className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ZapIcon className="h-4 w-4 text-brand-300" />
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-white/70">Supabase pgvector Mirror</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={syncing}
+              onClick={handleSyncNow}
+              className="flex items-center gap-1.5 rounded-lg border border-brand-500/30 bg-brand-500/15 px-3 py-1 text-xs font-medium text-brand-300 hover:bg-brand-500/25 transition-all disabled:opacity-50"
+            >
+              <SparklesIcon className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Syncing...' : 'Sync to Cloud Now'}
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-white/70">Supabase Project URL</label>
+            <input
+              type="text"
+              required
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              placeholder="https://xyz.supabase.co"
+              className="w-full rounded-lg border border-white/10 bg-noir-950/80 px-3 py-2 text-xs text-white placeholder:text-white/20 focus:border-brand-500/50 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[11px] font-medium text-white/70">Supabase API Key (Publishable / Anon)</label>
+              <button
+                type="button"
+                onClick={() => setShowKey(!showKey)}
+                className="text-[10px] text-white/40 hover:text-white/70"
+              >
+                {showKey ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            <input
+              type={showKey ? 'text' : 'password'}
+              required
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              placeholder="sb_publishable_... or service_role"
+              className="w-full rounded-lg border border-white/10 bg-noir-950/80 px-3 py-2 font-mono text-xs text-white placeholder:text-white/20 focus:border-brand-500/50 focus:outline-none"
+            />
+          </div>
+
+          {/* Set-and-Forget Background Sync Toggle */}
+          <div className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-white/[0.01] p-3">
+            <div>
+              <div className="text-xs font-medium text-white">Continuous Background Sync (Set-and-Forget 24/7)</div>
+              <div className="text-[11px] text-white/40">Automatically uploads new 10-minute rollups and graph edges in the background.</div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoSyncInput}
+              onClick={() => setAutoSyncInput(!autoSyncInput)}
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors ${
+                autoSyncInput ? 'bg-brand-500' : 'bg-white/20'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                  autoSyncInput ? 'translate-x-4' : 'translate-x-0.5'
+                } mt-0.5`}
+              />
+            </button>
+          </div>
+
+          {/* Sync Stats Banner */}
+          {status.lastSync && (
+            <div className="rounded-lg border border-white/[0.06] bg-noir-900/40 p-2.5 text-[11px] text-white/60 flex items-center justify-between">
+              <span>Last synced: {new Date(status.lastSync).toLocaleTimeString()} ({new Date(status.lastSync).toLocaleDateString()})</span>
+              {status.lastStats && (
+                <span className="text-emerald-400 font-mono">
+                  {status.lastStats.rollups_uploaded ?? 0} rollups | {status.lastStats.vault_notes_uploaded ?? 0} notes
+                </span>
+              )}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-lg border border-white/10 bg-white/5 px-4 py-1.5 text-xs font-medium text-white hover:bg-white/10 transition-colors disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save Configuration'}
+          </button>
+        </div>
+      </form>
+
+      {/* 3. Personal MCP Connection (Agent Bridge) */}
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <KeyRoundIcon className="h-4 w-4 text-brand-300" />
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-white/70">Personal Agent Bridge (MCP)</h3>
+          </div>
+          <button
+            type="button"
+            onClick={handleCopySnippet}
+            className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-white hover:bg-white/10 transition-colors"
+          >
+            {copied ? <CheckIcon className="h-3 w-3 text-emerald-400" /> : <CopyIcon className="h-3 w-3 text-white/70" />}
+            {copied ? 'Copied!' : 'Copy Config'}
+          </button>
+        </div>
+
+        <p className="text-xs text-white/50">
+          Connect external AI agents (Claude Desktop, Cursor, Hermes, OpenClaw) directly to your personal memory partition:
+        </p>
+
+        {/* MCP client switcher tabs */}
+        <div className="flex gap-1 border-b border-white/[0.06] pb-2 text-xs">
+          {(['claude', 'cursor', 'hermes', 'rpc'] as const).map((tabKey) => (
+            <button
+              key={tabKey}
+              type="button"
+              onClick={() => setActiveMcpTab(tabKey)}
+              className={`rounded px-2.5 py-1 transition-colors ${
+                activeMcpTab === tabKey ? 'bg-white/10 text-white font-medium' : 'text-white/40 hover:text-white/70'
+              }`}
+            >
+              {tabKey === 'claude'
+                ? 'Claude Desktop'
+                : tabKey === 'cursor'
+                ? 'Cursor / Remote SSE'
+                : tabKey === 'hermes'
+                ? 'Hermes Cloud Client'
+                : 'Direct REST RPC'}
+            </button>
+          ))}
+        </div>
+
+        {/* Code Snippet Box */}
+        <div className="relative overflow-hidden rounded-lg border border-white/10 bg-noir-950 p-3">
+          <pre className="font-mono text-[11px] text-brand-200 overflow-x-auto whitespace-pre leading-relaxed">
+            {getMcpSnippet()}
+          </pre>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function DeveloperSection({ onBack }: { onBack: () => void }) {
   return (

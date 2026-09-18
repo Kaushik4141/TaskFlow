@@ -186,3 +186,24 @@ export interface TaskStats {
   mostUsedApps: [string, number][]
   tasksBySource: Record<string, number>
 }
+
+export interface CloudStatus {
+  configured: boolean
+  supabaseUrl: string
+  supabaseKey: string
+  autoSync: boolean
+  lastSync: string | null
+  lastStats: {
+    vault_notes_uploaded?: number
+    rollups_uploaded?: number
+    graph_edges_uploaded?: number
+    errors?: string[]
+    success?: boolean
+  } | null
+  authenticated: boolean
+  userId: string | null
+  userEmail: string | null
+  userName: string | null
+  userAvatar: string | null
+}
+

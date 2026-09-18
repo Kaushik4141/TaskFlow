@@ -58,11 +58,15 @@ class CloudMemory:
     def __init__(
         self,
         supabase_url: Optional[str] = None,
-        supabase_key: Optional[str] = None
+        supabase_key: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_token: Optional[str] = None,
     ) -> None:
         disc_url, disc_key = find_credentials()
         self.url = (supabase_url or disc_url or "").rstrip("/")
         self.key = (supabase_key or disc_key or "")
+        self.user_id = user_id or os.environ.get("TASKFLOW_USER_ID") or os.environ.get("SUPABASE_USER_ID")
+        self.token = user_token or os.environ.get("SUPABASE_ACCESS_TOKEN")
         
         if not self.url or not self.key:
             raise ValueError(
@@ -84,9 +88,10 @@ class CloudMemory:
             query_string = urllib.parse.urlencode(params)
             full_url = f"{full_url}?{query_string}"
 
+        bearer = self.token or self.key
         headers = {
             "apikey": self.key,
-            "Authorization": f"Bearer {self.key}",
+            "Authorization": f"Bearer {bearer}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
@@ -116,8 +121,10 @@ class CloudMemory:
             "match_limit": limit,
             "filter_project": project,
             "filter_time_bucket": time_bucket,
-            "query_embedding": None  # Handled by pgvector RPC or PostgREST fallback
+            "query_embedding": None,  # Handled by pgvector RPC or PostgREST fallback
         }
+        if self.user_id:
+            payload["filter_user_id"] = self.user_id
 
         try:
             rows = self._request("rpc/query_cloud_memory", method="POST", data=payload)
@@ -130,6 +137,8 @@ class CloudMemory:
                 "limit": str(limit),
                 "order": "window_start.desc"
             }
+            if self.user_id:
+                params["user_id"] = f"eq.{self.user_id}"
             if project:
                 params["project_slug"] = f"ilike.{project}"
             if query:
@@ -171,7 +180,10 @@ class CloudMemory:
 
     def get_manifest(self) -> Dict[str, Any]:
         """Read the Graph Topology Manifest from the cloud mirror for zero-hop routing."""
-        rows = self._request("vault_notes", method="GET", params={"path": "eq.TaskFlow/manifest.json", "select": "content"})
+        params = {"path": "eq.TaskFlow/manifest.json", "select": "content"}
+        if self.user_id:
+            params["user_id"] = f"eq.{self.user_id}"
+        rows = self._request("vault_notes", method="GET", params=params)
         if rows and isinstance(rows, list):
             try:
                 return json.loads(rows[0].get("content", "{}"))
@@ -181,7 +193,10 @@ class CloudMemory:
 
     def read_project(self, project_slug: str, max_lines: int = 40) -> Dict[str, Any]:
         """Read executive abstract of a project workstream note."""
-        rows = self._request("vault_notes", method="GET", params={"title": f"eq.{project_slug}", "select": "title,content,path"})
+        params = {"title": f"eq.{project_slug}", "select": "title,content,path"}
+        if self.user_id:
+            params["user_id"] = f"eq.{self.user_id}"
+        rows = self._request("vault_notes", method="GET", params=params)
         if not rows:
             return {"error": f"Project '{project_slug}' not found in cloud mirror"}
         content = rows[0].get("content", "")

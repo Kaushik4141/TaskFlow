@@ -497,6 +497,117 @@ pub async fn update_setting(
     Ok(())
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudStatus {
+    pub configured: bool,
+    pub supabase_url: String,
+    pub supabase_key: String,
+    pub auto_sync: bool,
+    pub last_sync: Option<String>,
+    pub last_stats: Option<serde_json::Value>,
+    pub authenticated: bool,
+    pub user_id: Option<String>,
+    pub user_email: Option<String>,
+    pub user_name: Option<String>,
+    pub user_avatar: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_cloud_status(state: State<'_, AppState>) -> Result<CloudStatus, String> {
+    let settings = get_settings(state).await?;
+    let url = settings.get("supabase_url").cloned().unwrap_or_default();
+    let key = settings.get("supabase_key").cloned().unwrap_or_default();
+    let configured = !url.is_empty() && !key.is_empty();
+    let auto_sync = settings.get("supabase_auto_sync").map(|s| s.as_str() != "false").unwrap_or(true);
+    let last_sync = settings.get("supabase_last_sync").cloned();
+    let last_stats = settings.get("supabase_last_sync_stats")
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+    
+    let user_id = settings.get("supabase_user_id").cloned();
+    let authenticated = user_id.is_some() && !user_id.as_deref().unwrap_or("").is_empty();
+    let user_email = settings.get("supabase_user_email").cloned();
+    let user_name = settings.get("supabase_user_name").cloned();
+    let user_avatar = settings.get("supabase_user_avatar").cloned();
+
+    Ok(CloudStatus {
+        configured,
+        supabase_url: url,
+        supabase_key: key,
+        auto_sync,
+        last_sync,
+        last_stats,
+        authenticated,
+        user_id,
+        user_email,
+        user_name,
+        user_avatar,
+    })
+}
+
+#[tauri::command]
+pub async fn save_cloud_settings(
+    state: State<'_, AppState>,
+    supabase_url: String,
+    supabase_key: String,
+    auto_sync: bool,
+) -> Result<(), String> {
+    update_setting(state.clone(), "supabase_url".to_string(), supabase_url).await?;
+    update_setting(state.clone(), "supabase_key".to_string(), supabase_key).await?;
+    update_setting(state, "supabase_auto_sync".to_string(), if auto_sync { "true".to_string() } else { "false".to_string() }).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn sync_cloud_now() -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .post("http://127.0.0.1:7878/sync_cloud")
+        .send()
+        .await
+        .map_err(|e| format!("Sidecar connection failed: {}", e))?;
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse sync response: {}", e))?;
+    Ok(json)
+}
+
+#[tauri::command]
+pub async fn get_google_oauth_url(state: State<'_, AppState>) -> Result<String, String> {
+    let settings = get_settings(state).await?;
+    let url = settings.get("supabase_url").cloned().unwrap_or_else(|| {
+        "https://cxarbuqzseembonxgpyw.supabase.co".to_string()
+    });
+    let clean_url = url.trim_end_matches('/');
+    let redirect = "http://localhost:7878/auth/callback";
+    Ok(format!("{}/auth/v1/authorize?provider=google&redirect_to={}", clean_url, redirect))
+}
+
+#[tauri::command]
+pub async fn sign_out_cloud(state: State<'_, AppState>) -> Result<(), String> {
+    let _ = reqwest::Client::new()
+        .post("http://127.0.0.1:7878/auth/signout")
+        .send()
+        .await;
+    
+    let keys = vec![
+        "supabase_user_id",
+        "supabase_user_email",
+        "supabase_user_name",
+        "supabase_user_avatar",
+        "supabase_access_token",
+        "supabase_refresh_token",
+    ];
+    for k in keys {
+        let _ = sqlx::query("DELETE FROM settings WHERE key = ?1")
+            .bind(k)
+            .execute(&state.db)
+            .await;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn get_capture_stats(
     state: State<'_, AppState>,
