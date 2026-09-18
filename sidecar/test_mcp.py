@@ -6,6 +6,7 @@ work correctly in isolation without requiring external network or live agent.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -134,10 +135,37 @@ Workstream description for sample project.
         assert "sample-project" in r_projects
         print("  Passed! Resources verified.")
 
-        print("\nALL MCP TESTS PASSED SUCCESSFULLY! The server is fully operational.")
+        # Test 10: Supabase unconfigured graceful degradation
+        print("\n[Test 10] Testing Supabase safe fallback when unconfigured...")
+        sync_res = mcp_server.sync_vault_to_supabase()
+        assert sync_res["success"] is False
+        assert "not configured" in sync_res["error"].lower()
+        cloud_query = mcp_server.query_cloud_vault("anything")
+        assert "not configured" in cloud_query[0]["error"].lower()
+        sb_status = json.loads(mcp_server.resource_supabase_status())
+        assert sb_status["configured"] is False
+        print("  Passed! Supabase tools gracefully inform client when unconfigured.")
+
+        # Test 11: Supabase credentials resolution
+        print("\n[Test 11] Testing Supabase credential discovery from environment...")
+        import supabase_client
+        os.environ["SUPABASE_URL"] = "https://example-test-project.supabase.co"
+        os.environ["SUPABASE_KEY"] = "mock-supabase-key-12345"
+        u, k = supabase_client.get_supabase_credentials()
+        assert u == "https://example-test-project.supabase.co"
+        assert k == "mock-supabase-key-12345"
+        assert supabase_client.is_supabase_configured() is True
+        sb_status_active = json.loads(mcp_server.resource_supabase_status())
+        assert sb_status_active["configured"] is True
+        print(f"  Passed! Resolved credentials: {u}")
+
+        print("\nALL 11 MCP & SUPABASE TESTS PASSED SUCCESSFULLY! The server is fully operational.")
         return 0
     finally:
+        os.environ.pop("SUPABASE_URL", None)
+        os.environ.pop("SUPABASE_KEY", None)
         shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 
 if __name__ == "__main__":

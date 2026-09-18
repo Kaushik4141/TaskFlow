@@ -25,9 +25,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from mcp.server.mcpserver import MCPServer
+import supabase_client
 
 # Initialize MCP Server
 server = MCPServer("taskflow-brain")
+
 
 
 def get_default_db_path() -> Path:
@@ -479,6 +481,47 @@ def append_project_note(project_slug: str, note: str) -> Dict[str, Any]:
 
 
 # =====================================================================
+# Tools: Supabase Cloud Sync & Remote Query
+# =====================================================================
+
+@server.tool()
+def sync_vault_to_supabase() -> Dict[str, Any]:
+    """Synchronize local Obsidian vault notes and vector embeddings into Supabase.
+    
+    Uploads notes into the 'vault_notes' table with full-text content, frontmatter,
+    and 384-dimensional semantic embeddings (SentenceTransformers).
+    """
+    tf_root = get_taskflow_root()
+    if not tf_root:
+        return {"success": False, "error": "Obsidian vault path not configured."}
+
+    if not supabase_client.is_supabase_configured():
+        return {
+            "success": False,
+            "error": "Supabase not configured. Set SUPABASE_URL and SUPABASE_KEY in environment or .env file."
+        }
+
+    return supabase_client.sync_vault_to_supabase(tf_root)
+
+
+@server.tool()
+def query_cloud_vault(query: str, semantic: bool = True, limit: int = 5) -> List[Dict[str, Any]]:
+    """Query the always-on Supabase cloud vault using semantic vector similarity or keyword filtering.
+    
+    Allows external agents to query the user's knowledge base even when the local laptop is off.
+    
+    Args:
+        query: Natural language query or search keyword.
+        semantic: If True, calls the 'search_vault_notes' vector similarity RPC function.
+        limit: Maximum number of matching notes to return (default: 5).
+    """
+    if not supabase_client.is_supabase_configured():
+        return [{"error": "Supabase not configured. Set SUPABASE_URL and SUPABASE_KEY."}]
+
+    return supabase_client.query_cloud_vault(query=query, semantic=semantic, limit=limit)
+
+
+# =====================================================================
 # Resources (MCP Standard)
 # =====================================================================
 
@@ -503,6 +546,18 @@ def resource_recent_activity() -> str:
     return json.dumps(rollups, indent=2)
 
 
+@server.resource("supabase://status")
+def resource_supabase_status() -> str:
+    """Live resource reporting Supabase cloud connectivity status."""
+    url, key = supabase_client.get_supabase_credentials()
+    status = {
+        "configured": bool(url and key),
+        "url": url or "Not configured",
+        "has_key": bool(key)
+    }
+    return json.dumps(status, indent=2)
+
+
 # =====================================================================
 # Main entrypoint
 # =====================================================================
@@ -523,8 +578,10 @@ def main() -> None:
     print(f"[TaskFlow MCP] Starting server using transport '{args.transport}'...", file=sys.stderr)
     vault = get_vault_path()
     db = get_default_db_path()
+    url, key = supabase_client.get_supabase_credentials()
     print(f"[TaskFlow MCP] Vault Path: {vault or 'Not configured (check TASKFLOW_VAULT)'}", file=sys.stderr)
     print(f"[TaskFlow MCP] SQLite DB: {db if db.exists() else 'Not found'}", file=sys.stderr)
+    print(f"[TaskFlow MCP] Supabase: {url if url and key else 'Not configured (set SUPABASE_URL / SUPABASE_KEY)'}", file=sys.stderr)
 
     if args.transport == "sse":
         print(f"[TaskFlow MCP] Serving SSE on http://{args.host}:{args.port}/sse", file=sys.stderr)
@@ -535,3 +592,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
