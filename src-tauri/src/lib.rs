@@ -178,6 +178,7 @@ pub fn run() {
             commands::get_project_candidates,
             commands::approve_project_candidate,
             commands::reject_project_candidate,
+            commands::query_graph_memory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TaskFlow");

@@ -17,6 +17,7 @@ from models import (
     FilterResponse,
     SummarizeRequest,
     SummarizeResponse,
+    QueryMemoryRequest,
 )
 
 embedder = None
@@ -161,6 +162,27 @@ async def ollama_status(url: str = "http://localhost:11434"):
             "available_models": [],
             "has_recommended_model": False,
         }
+
+
+@app.post("/query_memory")
+async def api_query_memory(request: QueryMemoryRequest):
+    """Scope-first, search-second graph memory retrieval endpoint for remote AI agents."""
+    from mcp_server import tool_query_graph_memory
+    return tool_query_graph_memory(
+        query=request.query,
+        project=request.project,
+        time_bucket=request.time_bucket,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        limit=request.limit,
+    )
+
+
+@app.get("/manifest")
+async def api_get_manifest():
+    """Read the TaskFlow Graph Topology Manifest for zero-hop machine routing."""
+    from mcp_server import tool_read_manifest
+    return tool_read_manifest()
 
 
 def _safe_error(error: Exception, api_key: str | None = None) -> str:

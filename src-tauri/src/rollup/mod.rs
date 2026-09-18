@@ -260,6 +260,11 @@ pub async fn run_rollup(
     .await
     .map_err(|err| err.to_string())?;
 
+    // Autonomous graph indexing: index entity relationships in SQLite graph_edges
+    if let Err(err) = crate::database::graph::record_rollup_edges(&state.db, &rollup).await {
+        eprintln!("[taskflow:rollup] graph edges indexing error: {err}");
+    }
+
     // Vault reflection. Only memory tasks write to the wiki (same rule as the
     // legacy daily-note flow); failures here never fail the roll-up itself —
     // the row in SQLite is the source of truth and the index can be rebuilt.
@@ -354,6 +359,19 @@ pub async fn run_rollup(
                         .await
                 {
                     eprintln!("[taskflow:rollup] daily index rebuild failed: {err}");
+                }
+                let month_bucket = if date_for_index.len() >= 7 {
+                    &date_for_index[..7]
+                } else {
+                    ""
+                };
+                if !month_bucket.is_empty() {
+                    if let Err(err) =
+                        wiki::monthly_digest::rebuild_monthly_digest(&db, &vault_for_index, month_bucket)
+                            .await
+                    {
+                        eprintln!("[taskflow:rollup] monthly digest rebuild failed: {err}");
+                    }
                 }
             }
         }

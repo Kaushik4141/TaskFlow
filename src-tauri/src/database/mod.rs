@@ -1,6 +1,8 @@
 pub mod documentation;
 pub mod events;
+pub mod graph;
 pub mod project_candidates;
+pub mod retrieval;
 pub mod rollups;
 pub mod schema;
 pub mod tasks;

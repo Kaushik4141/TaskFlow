@@ -1,7 +1,8 @@
 pub mod daily_index;
-pub mod links;
 pub mod hubs;
+pub mod links;
 pub mod lint;
+pub mod monthly_digest;
 pub mod workstream;
 
 use std::path::{Path, PathBuf};

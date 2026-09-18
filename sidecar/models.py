@@ -77,3 +77,13 @@ class SummarizeResponse(BaseModel):
     duration_seconds: int | None = None
     generated_locally: bool = Field(default=True)
     method: Optional[str] = None
+
+
+class QueryMemoryRequest(BaseModel):
+    query: Optional[str] = None
+    project: Optional[str] = None
+    time_bucket: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    limit: int = 5
+

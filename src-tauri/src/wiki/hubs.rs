@@ -401,6 +401,37 @@ pub fn update_index(vault: &Path, today_date: &str, summary: &str) -> io::Result
     let apps = collect_slugs("Apps");
     let sites = collect_slugs("Sites");
 
+    let collect_monthly_archives = || -> Vec<String> {
+        let mut archives = Vec::new();
+        let memory_dir = vault.join("TaskFlow").join("Memory");
+        if let Ok(year_entries) = fs::read_dir(&memory_dir) {
+            for y_entry in year_entries.flatten() {
+                let y_path = y_entry.path();
+                if y_path.is_dir() {
+                    let year_name = y_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if year_name.len() == 4 && year_name.chars().all(|c| c.is_ascii_digit()) {
+                        if let Ok(m_entries) = fs::read_dir(&y_path) {
+                            for m_entry in m_entries.flatten() {
+                                let m_path = m_entry.path();
+                                if m_path.extension().and_then(|e| e.to_str()) == Some("md") {
+                                    if let Some(stem) = m_path.file_stem().and_then(|s| s.to_str()) {
+                                        if stem.len() == 2 && stem.chars().all(|c| c.is_ascii_digit()) {
+                                            archives.push(format!("{year_name}/{stem}"));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        archives.sort();
+        archives.reverse();
+        archives
+    };
+    let monthly_archives = collect_monthly_archives();
+
     let mut out = String::new();
     out.push_str("---\n");
     out.push_str("type: graph_index\n");
@@ -410,6 +441,11 @@ pub fn update_index(vault: &Path, today_date: &str, summary: &str) -> io::Result
     out.push_str("  - moc\n");
     out.push_str(&format!("last_updated: {today_date}\n"));
     out.push_str("---\n\n");
+    out.push_str("<!-- AGENT DIRECTIVE:\n");
+    out.push_str("1. Check this index and TaskFlow/manifest.json first for zero-hop routing.\n");
+    out.push_str("2. For sub-50ms deterministic retrieval without file crawling, call `query_graph_memory`.\n");
+    out.push_str("3. Older daily notes are hierarchically sharded in `## Monthly Archives`.\n");
+    out.push_str("-->\n\n");
     out.push_str("# TaskFlow Memory Index\n\n");
     out.push_str("A chronological catalog and Map of Content (MOC) connecting all workstreams, hubs, and daily notes.\n\n");
 
@@ -437,12 +473,37 @@ pub fn update_index(vault: &Path, today_date: &str, summary: &str) -> io::Result
         out.push('\n');
     }
 
+    if !monthly_archives.is_empty() {
+        out.push_str("## Monthly Archives\n");
+        for arc in &monthly_archives {
+            out.push_str(&format!("- [[Memory/{arc}]]\n"));
+        }
+        out.push('\n');
+    }
+
     out.push_str("## Daily Memory Notes\n");
     for line in &lines {
         out.push_str(line);
         out.push('\n');
     }
-    fs::write(&path, out)?;
+    fs::write(&path, &out)?;
+
+    // Emit machine-readable manifest.json for zero-hop agent ingestion
+    let manifest_path = vault.join("TaskFlow").join("manifest.json");
+    let manifest_data = serde_json::json!({
+        "version": 1,
+        "lastUpdated": today_date,
+        "routing": {
+            "projects": projects,
+            "apps": apps,
+            "sites": sites,
+            "monthlyArchives": monthly_archives,
+        }
+    });
+    if let Ok(manifest_str) = serde_json::to_string_pretty(&manifest_data) {
+        let _ = fs::write(&manifest_path, manifest_str);
+    }
+
     Ok(path)
 }
 

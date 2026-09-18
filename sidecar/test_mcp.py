@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Test harness for TaskFlow MCP Server.
+"""Test harness for TaskFlow MCP Server & GraphRAG Engine.
 
-Validates that all MCP tools, resources, and vault reader/writer functions
-work correctly in isolation without requiring external network or live agent.
+Validates that:
+1. Direct Python tool dispatch (query_graph_memory, read_manifest, read_project, etc.) works.
+2. The JSON-RPC 2.0 stdio MCP protocol engine operates cleanly without external pip packages.
 """
 from __future__ import annotations
 
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-# Add sidecar directory to sys.path
 sidecar_dir = Path(__file__).parent.resolve()
 if str(sidecar_dir) not in sys.path:
     sys.path.insert(0, str(sidecar_dir))
@@ -22,7 +23,7 @@ import mcp_server
 
 
 def test_mcp_tools():
-    print("=== Testing TaskFlow MCP Server ===")
+    print("=== Testing TaskFlow MCP Server Tools ===")
 
     # 1. Setup temporary test vault
     temp_dir = Path(tempfile.mkdtemp(prefix="taskflow_mcp_test_"))
@@ -30,18 +31,43 @@ def test_mcp_tools():
     tf_root = vault_dir / "TaskFlow"
     projects_dir = tf_root / "Projects"
     memory_dir = tf_root / "Memory" / "Daily"
+    monthly_dir = tf_root / "Memory" / "2026"
 
     projects_dir.mkdir(parents=True, exist_ok=True)
     memory_dir.mkdir(parents=True, exist_ok=True)
+    monthly_dir.mkdir(parents=True, exist_ok=True)
 
     # Populate test project
-    (projects_dir / "sample-project.md").write_text("""# Sample Project
+    (projects_dir / "TaskFlow.md").write_text("""# Projects/TaskFlow
 
-Workstream description for sample project.
+> [!abstract] Current Status
+> **Latest Activity**: [2026-09-18] MCP Server & GraphRAG Engine
+> **Active Tools**: [[Apps/cursor]], [[Apps/ghostty]]
 
 ## Activity Timeline
-- 10:00 AM: Worked on initial setup
-- 11:30 AM: Fixed compiler bugs
+- 10:00 AM: Scope-first retrieval engine
+- 11:30 AM: Graph edges table indexing
+""", encoding="utf-8")
+
+    # Populate test manifest
+    (tf_root / "manifest.json").write_text(json.dumps({
+        "version": 1,
+        "lastUpdated": "2026-09-18",
+        "routing": {
+            "projects": ["TaskFlow", "AuthService"],
+            "apps": ["cursor", "ghostty"],
+            "monthlyArchives": ["2026/09"]
+        }
+    }), encoding="utf-8")
+
+    # Populate test monthly digest
+    (monthly_dir / "09.md").write_text("""---
+type: monthly_digest
+year: 2026
+month: "09"
+---
+# September 2026 Memory Digest
+- [[Projects/TaskFlow]] — 12 rollups
 """, encoding="utf-8")
 
     # Populate test daily note
@@ -50,123 +76,127 @@ Workstream description for sample project.
     (memory_dir / f"{today_str}.md").write_text(f"""# Daily Notes for {today_str}
 
 ## Highlights
-- Accomplished major tasks
-- Tested MCP integration
+- Tested MCP GraphRAG integration
 """, encoding="utf-8")
 
-    # Point environment to test vault
     os.environ["TASKFLOW_VAULT"] = str(vault_dir)
 
     try:
-        # Test 1: list_vault_tree
-        print("\n[Test 1] Testing list_vault_tree()...")
-        tree = mcp_server.list_vault_tree()
-        assert tree["file_count"] >= 2, f"Expected >= 2 files, got {tree['file_count']}"
-        print(f"  Passed! Found {tree['file_count']} files in vault.")
-
-        # Test 2: list_projects
-        print("\n[Test 2] Testing list_projects()...")
-        projects = mcp_server.list_projects()
+        # Test 1: list_projects
+        print("\n[Test 1] Testing list_projects()...")
+        projects = mcp_server.tool_list_projects()
         slugs = [p["slug"] for p in projects]
-        assert "sample-project" in slugs, f"Expected 'sample-project' in {slugs}"
-        print(f"  Passed! Projects: {slugs}")
+        assert "TaskFlow" in slugs, f"Expected 'TaskFlow' in {slugs}"
+        print(f"  Passed! Projects found: {slugs}")
 
-        # Test 3: read_project
-        print("\n[Test 3] Testing read_project('sample-project')...")
-        proj = mcp_server.read_project("sample-project")
-        assert "Activity Timeline" in proj["content"], "Expected Activity Timeline in content"
-        print("  Passed! Project content loaded correctly.")
+        # Test 2: read_manifest
+        print("\n[Test 2] Testing read_manifest()...")
+        manifest = mcp_server.tool_read_manifest()
+        assert manifest.get("version") == 1
+        assert "TaskFlow" in manifest["routing"]["projects"]
+        print(f"  Passed! Manifest topology verified.")
 
-        # Test 4: read_daily_note
-        print("\n[Test 4] Testing read_daily_note('today')...")
-        daily = mcp_server.read_daily_note("today")
-        assert daily["exists"] is True, "Expected daily note to exist"
-        assert "Tested MCP integration" in daily["content"]
-        print("  Passed! Daily note read successfully.")
+        # Test 3: read_monthly_digest
+        print("\n[Test 3] Testing read_monthly_digest('2026-09')...")
+        digest = mcp_server.tool_read_monthly_digest("2026-09")
+        assert digest.get("exists") is True
+        assert "September 2026 Memory Digest" in digest["content"]
+        print(f"  Passed! Monthly digest read successfully.")
 
-        # Test 5: search_vault (keyword)
-        print("\n[Test 5] Testing search_vault (keyword)...")
-        results = mcp_server.search_vault("compiler bugs", semantic=False)
-        assert len(results) > 0, "Expected search results for 'compiler bugs'"
-        assert "sample-project" in results[0]["path"]
-        print(f"  Passed! Found {len(results)} matches.")
+        # Test 4: read_project (with line capping)
+        print("\n[Test 4] Testing read_project('TaskFlow', max_lines=5)...")
+        proj = mcp_server.tool_read_project("TaskFlow", max_lines=5)
+        assert proj["slug"] == "TaskFlow"
+        assert len(proj["content"].splitlines()) <= 5
+        print(f"  Passed! Executive abstract read with line capping.")
 
-        # Test 6: search_vault (semantic if torch/sentence_transformers available)
-        print("\n[Test 6] Testing search_vault (semantic similarity)...")
-        try:
-            sem_results = mcp_server.search_vault("fixing errors in code", semantic=True)
-            print(f"  Semantic search returned {len(sem_results)} results. Top score: {sem_results[0]['score']}")
-            assert len(sem_results) > 0
-            print("  Passed! Semantic vector search verified.")
-        except Exception as e:
-            print(f"  Skipping semantic search due to environment constraint: {e}")
+        # Test 5: read_daily_note
+        print("\n[Test 5] Testing read_daily_note('today')...")
+        daily = mcp_server.tool_read_daily_note("today")
+        assert daily["exists"] is True
+        assert "Tested MCP GraphRAG integration" in daily["content"]
+        print(f"  Passed! Daily note read successfully.")
 
-        # Test 7: create_inbox_note
-        print("\n[Test 7] Testing create_inbox_note()...")
-        inbox_res = mcp_server.create_inbox_note(
-            title="Agent Meeting Summary",
-            content="Summary generated by Hermes agent.",
-            tags=["hermes", "ai-meeting"]
-        )
-        assert inbox_res["success"] is True
-        inbox_file = Path(inbox_res["path"])
-        assert inbox_file.exists()
-        assert "tags: [hermes, ai-meeting, agent-note]" in inbox_file.read_text(encoding="utf-8")
-        print(f"  Passed! Created inbox note at: {inbox_file.name}")
+        # Test 6: create_inbox_note
+        print("\n[Test 6] Testing create_inbox_note()...")
+        inbox = mcp_server.tool_create_inbox_note("Judge Finding", "Excellent latency and accuracy.")
+        assert inbox["success"] is True
+        assert Path(inbox["path"]).exists()
+        print(f"  Passed! Inbox note safely written to {inbox['path']}.")
 
-        # Test 8: append_project_note
-        print("\n[Test 8] Testing append_project_note()...")
-        append_res = mcp_server.append_project_note(
-            project_slug="sample-project",
-            note="Agent suggests adding unit test for parser."
-        )
-        assert append_res["success"] is True
-        updated_content = (projects_dir / "sample-project.md").read_text(encoding="utf-8")
-        assert "## Agent Notes" in updated_content
-        assert "Agent suggests adding unit test" in updated_content
-        assert "## Activity Timeline" in updated_content  # Activity timeline untouched!
-        print("  Passed! Agent note safely appended without touching activity timeline.")
+        # Test 7: query_graph_memory against live or test SQLite
+        print("\n[Test 7] Testing query_graph_memory()...")
+        res = mcp_server.tool_query_graph_memory(query="test", limit=3)
+        assert "context_summary" in res
+        print(f"  Passed! Scoped retrieval output synthesized successfully.")
 
-        # Test 9: Resources
-        print("\n[Test 9] Testing MCP resources...")
-        r_daily = mcp_server.resource_daily_today()
-        assert "Daily Notes" in r_daily
-        r_projects = mcp_server.resource_projects()
-        assert "sample-project" in r_projects
-        print("  Passed! Resources verified.")
-
-        # Test 10: Supabase unconfigured graceful degradation
-        print("\n[Test 10] Testing Supabase safe fallback when unconfigured...")
-        sync_res = mcp_server.sync_vault_to_supabase()
-        assert sync_res["success"] is False
-        assert "not configured" in sync_res["error"].lower()
-        cloud_query = mcp_server.query_cloud_vault("anything")
-        assert "not configured" in cloud_query[0]["error"].lower()
-        sb_status = json.loads(mcp_server.resource_supabase_status())
-        assert sb_status["configured"] is False
-        print("  Passed! Supabase tools gracefully inform client when unconfigured.")
-
-        # Test 11: Supabase credentials resolution
-        print("\n[Test 11] Testing Supabase credential discovery from environment...")
-        import supabase_client
-        os.environ["SUPABASE_URL"] = "https://example-test-project.supabase.co"
-        os.environ["SUPABASE_KEY"] = "mock-supabase-key-12345"
-        u, k = supabase_client.get_supabase_credentials()
-        assert u == "https://example-test-project.supabase.co"
-        assert k == "mock-supabase-key-12345"
-        assert supabase_client.is_supabase_configured() is True
-        sb_status_active = json.loads(mcp_server.resource_supabase_status())
-        assert sb_status_active["configured"] is True
-        print(f"  Passed! Resolved credentials: {u}")
-
-        print("\nALL 11 MCP & SUPABASE TESTS PASSED SUCCESSFULLY! The server is fully operational.")
-        return 0
     finally:
-        os.environ.pop("SUPABASE_URL", None)
-        os.environ.pop("SUPABASE_KEY", None)
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+def test_mcp_stdio_protocol():
+    print("\n=== Testing MCP JSON-RPC 2.0 Stdio Protocol ===")
+    server_script = str(sidecar_dir / "mcp_server.py")
+
+    proc = subprocess.Popen(
+        [sys.executable, server_script],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        # Step 1: Send 'initialize'
+        init_req = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"clientInfo": {"name": "test-agent", "version": "1.0"}}
+        }
+        proc.stdin.write(json.dumps(init_req) + "\n")
+        proc.stdin.flush()
+
+        init_res = json.loads(proc.stdout.readline())
+        assert init_res["id"] == 1
+        assert init_res["result"]["serverInfo"]["name"] == "taskflow-brain"
+        print("  [Pass] 'initialize' handshake completed.")
+
+        # Step 2: Send 'tools/list'
+        tools_req = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        proc.stdin.write(json.dumps(tools_req) + "\n")
+        proc.stdin.flush()
+
+        tools_res = json.loads(proc.stdout.readline())
+        assert tools_res["id"] == 2
+        tool_names = [t["name"] for t in tools_res["result"]["tools"]]
+        assert "query_graph_memory" in tool_names
+        assert "read_manifest" in tool_names
+        assert "read_monthly_digest" in tool_names
+        print(f"  [Pass] 'tools/list' returned {len(tool_names)} tools: {tool_names[:4]}...")
+
+        # Step 3: Send 'tools/call' for 'read_manifest'
+        call_req = {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "read_manifest", "arguments": {}}
+        }
+        proc.stdin.write(json.dumps(call_req) + "\n")
+        proc.stdin.flush()
+
+        call_res = json.loads(proc.stdout.readline())
+        assert call_res["id"] == 3
+        assert "content" in call_res["result"]
+        print("  [Pass] 'tools/call' executed and returned valid content block.")
+
+    finally:
+        proc.stdin.close()
+        proc.terminate()
+        proc.wait(timeout=2)
+
 
 if __name__ == "__main__":
-    sys.exit(test_mcp_tools())
+    test_mcp_tools()
+    test_mcp_stdio_protocol()
+    print("\n🎉 ALL TaskFlow MCP tests passed successfully!")
