@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TaskFlow MCP Client Configurations",
+  "description": "Example MCP client configuration snippets for connecting external AI agents to TaskFlow",
+  "examples": {
+    "claude_desktop_and_cursor": {
+      "description": "Add this to %APPDATA%\\Claude\\claude_desktop_config.json or .cursor/mcp.json",
+      "mcpServers": {
+        "taskflow": {
+          "command": "d:\\TaskFlow\\.venv-sidecar\\Scripts\\python.exe",
+          "args": [
+            "d:\\TaskFlow\\sidecar\\mcp_server.py"
+          ],
+          "env": {
+            "PYTHONPATH": "d:\\TaskFlow\\sidecar"
+          }
+        }
+      }
+    },
+    "hermes_agent_stdio": {
+      "description": "Hermes Agent local stdio configuration",
+      "mcpServers": {
+        "taskflow-brain": {
+          "command": "d:\\TaskFlow\\.venv-sidecar\\Scripts\\python.exe",
+          "args": [
+            "d:\\TaskFlow\\sidecar\\mcp_server.py",
+            "--transport",
+            "stdio"
+          ]
+        }
+      }
+    },
+    "openclaw_or_remote_hermes_sse": {
+      "description": "Run the server first with: python sidecar/mcp_server.py --transport sse --port 8765",
+      "mcpServers": {
+        "taskflow-remote": {
+          "url": "http://127.0.0.1:8765/sse"
+        }
+      }
+    }
+  }
+}

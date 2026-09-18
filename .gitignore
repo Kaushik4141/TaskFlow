@@ -150,15 +150,10 @@ src-tauri/sidecar/
 sidecar/venv/
 sidecar/__pycache__/
 sidecar/.pytest_cache/
-.venv-sidecar/
 
 # IDEs / Editors
 .vscode/
 .idea/
-.claude/
-.codex/
-.cursor/
-.impeccable/
 *.swp
 *.swo
 
@@ -166,4 +161,7 @@ sidecar/.pytest_cache/
 .DS_Store
 Thumbs.db
 opencode.json
+
+.venv/
+.venv-sidecar/
 
