@@ -61,6 +61,7 @@ export default function App() {
     selectTaskById,
     startTask,
     stopTask,
+    setSelectedRollupId,
   } = useTaskStore()
 
   const [helpOpen, setHelpOpen] = useState(false)
@@ -245,7 +246,13 @@ export default function App() {
                   {settingsOpen ? (
                     <Settings />
                   ) : sidebarView === 'timeline' && selectedTask ? (
-                    <Timeline taskId={selectedTask.id} onBack={() => setSidebarView('tasks')} />
+                    <Timeline
+                      taskId={selectedTask.id}
+                      onBack={() => {
+                        setSelectedRollupId(null)
+                        setSidebarView('tasks')
+                      }}
+                    />
                   ) : (
                     <TaskList onSelectTimeline={() => setSidebarView('timeline')} />
                   )}

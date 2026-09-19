@@ -29,6 +29,12 @@ export default function ActiveTask({ task }: { task: Task }) {
   )
 
   useEffect(() => {
+    if (selectedRollupId && rollups.length > 0 && !rollups.some((r) => r.id === selectedRollupId)) {
+      setSelectedRollupId(null)
+    }
+  }, [selectedRollupId, rollups, setSelectedRollupId])
+
+  useEffect(() => {
     if (task.status !== 'active') {
       return
     }

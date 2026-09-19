@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   ActivityIcon,
@@ -223,7 +223,7 @@ export default function Timeline({ taskId, onBack }: { taskId: string; onBack?: 
                           <PiecesRollupCard
                             rollup={rollup}
                             isSelected={rollup.id === selectedRollupId}
-                            onSelect={() => setSelectedRollupId(rollup.id === selectedRollupId ? null : rollup.id)}
+                            onSelect={() => setSelectedRollupId(rollup.id)}
                           />
                         </motion.div>
                       ))}
@@ -256,10 +256,18 @@ function PiecesRollupCard({
   isSelected?: boolean
   onSelect?: () => void
 }) {
+  const cardRef = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState(false)
   const keyPoints = useMemo(() => parseJsonArray(rollup.keyPoints), [rollup.keyPoints])
   const apps = useMemo(() => parseJsonArray(rollup.apps), [rollup.apps])
   const workstream = rollup.workstreamSlug ?? 'Inbox'
+
+  // Keep sidebar selected-row indicator in view when navigating via keyboard [ / ] or next/prev in workspace
+  useEffect(() => {
+    if (isSelected && cardRef.current) {
+      cardRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [isSelected])
 
   // Relative time + exact timestamp
   const timeLabel = useMemo(() => {
@@ -279,6 +287,7 @@ function PiecesRollupCard({
 
   return (
     <div
+      ref={cardRef}
       role="button"
       tabIndex={0}
       onClick={() => onSelect?.()}
@@ -307,9 +316,13 @@ function PiecesRollupCard({
         <div className="min-w-0 flex-1">
           {/* Title: single line, medium weight, truncate with ellipsis */}
           <h3
-            className={`truncate text-xs font-medium transition-colors ${
+            className={`truncate text-xs font-medium transition-colors cursor-pointer ${
               isSelected ? 'text-white' : 'text-white/90 group-hover:text-white'
             }`}
+            onClick={(e) => {
+              e.stopPropagation()
+              onSelect?.()
+            }}
           >
             {rollup.title}
           </h3>
