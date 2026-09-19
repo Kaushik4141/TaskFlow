@@ -100,6 +100,80 @@ def get_supabase_credentials() -> Tuple[Optional[str], Optional[str]]:
     return url, key
 
 
+def is_jwt_expired(token: str, buffer_seconds: int = 120) -> bool:
+    """Check whether a JWT token is expired or expiring soon (within buffer_seconds)."""
+    if not token or not isinstance(token, str):
+        return True
+    try:
+        import base64
+        import time
+        parts = token.split(".")
+        if len(parts) != 3:
+            return True
+        payload_b64 = parts[1]
+        payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
+        payload_json = base64.urlsafe_b64decode(payload_b64.encode("utf-8")).decode("utf-8")
+        payload = json.loads(payload_json)
+        exp = payload.get("exp")
+        if not exp:
+            return False
+        return time.time() >= (exp - buffer_seconds)
+    except Exception:
+        return True
+
+
+def refresh_supabase_session() -> Optional[str]:
+    """Attempt to refresh an expired access token using the stored refresh_token."""
+    db_path = get_default_db_path()
+    if not db_path.exists():
+        return None
+    try:
+        con = sqlite3.connect(str(db_path))
+        cur = con.cursor()
+        cur.execute("SELECT value FROM settings WHERE key = 'supabase_refresh_token'")
+        row = cur.fetchone()
+        if not row or not row[0]:
+            con.close()
+            return None
+        refresh_token = row[0]
+
+        url, key = get_supabase_credentials()
+        if not url or not key:
+            con.close()
+            return None
+
+        clean_url = url.rstrip("/")
+        refresh_url = f"{clean_url}/auth/v1/token?grant_type=refresh_token"
+        req = urllib.request.Request(
+            refresh_url,
+            data=json.dumps({"refresh_token": refresh_token}).encode("utf-8"),
+            headers={"apikey": key, "Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            new_access = data.get("access_token")
+            new_refresh = data.get("refresh_token")
+            if new_access:
+                cur.execute("""
+                    INSERT INTO settings (key, value) VALUES ('supabase_access_token', ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """, (new_access,))
+                if new_refresh:
+                    cur.execute("""
+                        INSERT INTO settings (key, value) VALUES ('supabase_refresh_token', ?)
+                        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """, (new_refresh,))
+                con.commit()
+                con.close()
+                print("[Supabase Auth] Successfully auto-refreshed access token.", flush=True)
+                return new_access
+        con.close()
+    except Exception as e:
+        print(f"[Supabase Auth] Auto-refresh session error: {e}", flush=True)
+    return None
+
+
 def get_authenticated_user() -> Tuple[Optional[str], Optional[str]]:
     """Return (user_id, access_token) from SQLite settings if user is logged in via Supabase Auth."""
     db_path = get_default_db_path()
@@ -111,7 +185,15 @@ def get_authenticated_user() -> Tuple[Optional[str], Optional[str]]:
         cur.execute("SELECT key, value FROM settings WHERE key IN ('supabase_user_id', 'supabase_access_token')")
         rows = dict(cur.fetchall())
         con.close()
-        return rows.get("supabase_user_id"), rows.get("supabase_access_token")
+        user_id = rows.get("supabase_user_id")
+        access_token = rows.get("supabase_access_token")
+
+        if access_token and is_jwt_expired(access_token):
+            refreshed = refresh_supabase_session()
+            if refreshed:
+                access_token = refreshed
+
+        return user_id, access_token
     except Exception:
         return None, None
 
@@ -133,6 +215,7 @@ def _supabase_request(
     params: Optional[Dict[str, str]] = None,
     headers_extra: Optional[Dict[str, str]] = None,
     auth_token: Optional[str] = None,
+    _retry_on_expired_jwt: bool = True,
 ) -> Any:
     """Execute a direct REST request against Supabase PostgREST API using standard urllib."""
     url, key = get_supabase_credentials()
@@ -171,6 +254,20 @@ def _supabase_request(
             return json.loads(raw)
     except urllib.error.HTTPError as e:
         error_body = e.read().decode("utf-8", errors="replace")
+        # Handle expired JWT automatically
+        if e.code == 401 and "JWT expired" in error_body and _retry_on_expired_jwt:
+            print("[Supabase Auth] Access token expired during request. Auto-refreshing...", flush=True)
+            new_token = refresh_supabase_session()
+            if new_token:
+                return _supabase_request(
+                    endpoint=endpoint,
+                    method=method,
+                    data=data,
+                    params=params,
+                    headers_extra=headers_extra,
+                    auth_token=new_token,
+                    _retry_on_expired_jwt=False,
+                )
         raise RuntimeError(f"Supabase HTTP {e.code} Error: {error_body}") from e
     except Exception as e:
         raise RuntimeError(f"Supabase Connection Error: {e}") from e
