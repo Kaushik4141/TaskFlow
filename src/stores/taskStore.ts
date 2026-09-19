@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { create } from 'zustand'
-import type { CaptureStats, Documentation, Event, Integration, Note, Rollup, SearchResult, Task, TaskStats, TestResult, Ticket } from '../types'
+import type { CaptureStats, Documentation, Event, Integration, MemorySearchResponse, Note, Rollup, SearchResult, Task, TaskStats, TestResult, Ticket } from '../types'
 import { useToastStore } from './toastStore'
 
 const toast = (type: 'success' | 'error' | 'info', message: string) => {
@@ -80,6 +80,7 @@ interface TaskStore {
   completeOnboarding: () => void
   fetchDocumentationHistory: (taskId: string) => Promise<void>
   searchDocumentation: (query: string) => Promise<SearchResult[]>
+  searchMemory: (query: string, project?: string, limit?: number) => Promise<MemorySearchResponse>
 }
 
 export const useTaskStore = create<TaskStore>((set, get) => ({
@@ -370,6 +371,14 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
   searchDocumentation: async (query) => {
     return invoke<SearchResult[]>('search_documentation', { query })
+  },
+
+  searchMemory: async (query, project, limit) => {
+    return invoke<MemorySearchResponse>('search_memory', {
+      query,
+      project: project ?? null,
+      limit: limit ?? 10,
+    })
   },
 }))
 

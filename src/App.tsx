@@ -111,9 +111,13 @@ export default function App() {
   })
 
   const handleSearchNavigate = useCallback(
-    (taskId: string) => {
+    async (taskId: string, rollupId?: string) => {
       setSettingsOpen(false)
-      void selectTaskById(taskId)
+      await selectTaskById(taskId)
+      if (rollupId) {
+        useTaskStore.getState().setSelectedRollupId(rollupId)
+        setSidebarView('timeline')
+      }
     },
     [setSettingsOpen, selectTaskById],
   )

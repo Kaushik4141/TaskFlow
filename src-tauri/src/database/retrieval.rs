@@ -20,6 +20,7 @@ pub struct GraphQueryRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ScoredMemoryResult {
     pub rollup_id: String,
+    pub task_id: String,
     pub title: String,
     pub project_slug: Option<String>,
     pub window_start: String,
@@ -310,6 +311,7 @@ pub async fn query_graph_memory(
 
         results.push(ScoredMemoryResult {
             rollup_id: rollup.id,
+            task_id: rollup.task_id,
             title: rollup.title,
             project_slug: rollup.workstream_slug,
             window_start: rollup.window_start,

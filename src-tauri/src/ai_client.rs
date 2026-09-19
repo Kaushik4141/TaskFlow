@@ -88,6 +88,38 @@ pub struct SummarizeResponse {
     pub method: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AskMemoryRequest {
+    pub query: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ollama_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ollama_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AskMemoryResponse {
+    pub query: String,
+    pub answer: String,
+    pub scoped_count: usize,
+    #[serde(default)]
+    pub results: Vec<serde_json::Value>,
+}
+
 #[derive(Debug, Deserialize)]
 struct HealthResponse {
     status: String,
@@ -211,6 +243,21 @@ impl AiClient {
             .map_err(|err| format!("Failed to parse embedding response: {err}"))?;
 
         Ok(result.vector.into_iter().map(|v| v as f32).collect())
+    }
+
+    pub async fn ask_memory(&self, req: &AskMemoryRequest) -> Result<AskMemoryResponse, String> {
+        self.client
+            .post(format!("{}/ask_memory", self.base_url))
+            .json(req)
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|err| err.to_string())?
+            .error_for_status()
+            .map_err(|err| err.to_string())?
+            .json::<AskMemoryResponse>()
+            .await
+            .map_err(|err| err.to_string())
     }
 }
 
