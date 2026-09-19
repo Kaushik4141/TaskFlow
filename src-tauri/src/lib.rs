@@ -174,6 +174,7 @@ pub fn run() {
             commands::get_task_stats,
             commands::get_documentation_history,
             commands::get_setting,
+            commands::get_platform,
             commands::lint_wiki,
             commands::get_project_candidates,
             commands::approve_project_candidate,

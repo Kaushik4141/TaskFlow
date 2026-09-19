@@ -1,10 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { differenceInSeconds, format, formatDistanceStrict, isToday, isYesterday, parseISO } from 'date-fns'
-import { CircleCheckIcon, LoaderCircleIcon, LayoutListIcon, PlusIcon, ArrowDownUpIcon, SearchIcon, XIcon } from '@animateicons/react/lucide'
+import { CircleCheckIcon, LoaderCircleIcon, LayoutListIcon, PlusIcon, ArrowDownUpIcon, SearchIcon, XIcon, ChevronDownIcon } from '@animateicons/react/lucide'
 import { useTaskStore } from '../stores/taskStore'
 import { SkeletonCard } from './Skeleton'
 import TaskFlowLogo from './TaskFlowLogo'
+import AppLogo from './AppLogo'
 import { HoverCard, modalVariants, motion, selectionSpring, useStaggerContainer, useStaggerItem } from '../lib/motion'
 import type { Integration, Task, Ticket } from '../types'
 
@@ -137,7 +138,7 @@ export default function TaskList({ onSelectTimeline }: { onSelectTimeline?: () =
           <EmptyState onCreate={() => setModalOpen(true)} />
         ) : (
           Object.entries(groupedTasks).map(([date, dateTasks]) => (
-            <TaskGroup key={date} label={date}>
+            <TaskGroup key={date} label={date} count={dateTasks.length}>
               {dateTasks.map((task) => (
                 <TaskRow
                   key={task.id}
@@ -209,11 +210,26 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   )
 }
 
-function TaskGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function TaskGroup({ label, count, children }: { label: string; count: number; children: React.ReactNode }) {
+  const [collapsed, setCollapsed] = useState(false)
   return (
-    <section className="mb-5">
-      <h2 className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-white/35">{label}</h2>
-      <div className="space-y-1.5">{children}</div>
+    <section className="mb-3 last:mb-1">
+      <button
+        type="button"
+        onClick={() => setCollapsed(!collapsed)}
+        className="mb-1 flex w-full items-center justify-between rounded-lg px-2 py-1 text-xs font-semibold text-white/70 hover:bg-white/[0.04] transition-colors"
+      >
+        <span className="flex items-center gap-2">
+          <span>{label}</span>
+          <span className="rounded-full bg-white/[0.06] px-1.5 py-0.2 text-[10px] text-white/40 tabular-nums">
+            {count}
+          </span>
+        </span>
+        <ChevronDownIcon
+          className={`h-3.5 w-3.5 text-white/40 transition-transform ${collapsed ? '-rotate-90' : ''}`}
+        />
+      </button>
+      {!collapsed && <div className="space-y-0.5">{children}</div>}
     </section>
   )
 }
@@ -233,47 +249,80 @@ export function TaskRow({ task, selected, eventCount, onClick }: { task: Task; s
   const containerV = useStaggerContainer(0.04)
   const itemV = useStaggerItem()
 
+  const metaText = task.description?.trim()
+    ? task.description.trim()
+    : `${eventCount} ${eventCount === 1 ? 'event' : 'events'}`
+
+  const hasSource = task.source && task.source !== 'manual'
+
   return (
     <motion.div variants={containerV} initial="hidden" animate="show">
-      <HoverCard>
-        <motion.button
-          type="button"
-          variants={itemV}
-          whileTap={{ scale: 0.99 }}
-          className={`relative w-full overflow-hidden rounded-xl border p-3 text-left transition-colors ${
-            selected
-              ? 'border-brand-500/40 bg-brand-500/[0.08]'
-              : 'border-white/[0.06] bg-white/[0.015] hover:border-white/15 hover:bg-white/[0.04]'
-          }`}
-          onClick={onClick}
-        >
-          {/* Shared-layout selection marker — slides between rows */}
-          {selected && (
-            <motion.div
-              layoutId="task-selected-bar"
-              transition={selectionSpring}
-              className="absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-brand-400 to-brand-600"
-            />
-          )}
-          {/* Active task subtle pulse marker */}
-          {task.status === 'active' && (
-            <span className="absolute right-3 top-3 flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-pulse-ring rounded-full bg-brand-500 opacity-60" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-500" />
-            </span>
-          )}
-          <div className="mb-2 flex items-start justify-between gap-3 pr-4">
-            <h3 className="line-clamp-2 text-sm font-semibold text-white/90">{task.title}</h3>
+      <motion.button
+        type="button"
+        variants={itemV}
+        whileTap={{ scale: 0.99 }}
+        className={`group relative w-full px-2.5 py-2 text-left transition-colors rounded-lg border-b border-white/[0.03] last:border-b-0 ${
+          selected
+            ? 'bg-brand-500/[0.08]'
+            : 'bg-transparent hover:bg-white/[0.035]'
+        }`}
+        onClick={onClick}
+      >
+        {/* Left accent bar on selected */}
+        {selected && (
+          <motion.div
+            layoutId="task-selected-bar"
+            transition={selectionSpring}
+            className="absolute inset-y-1 left-0 w-[3px] rounded-r-full bg-gradient-to-b from-brand-400 to-brand-600"
+          />
+        )}
+
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            {/* Title: single line, medium weight, truncate with ellipsis */}
+            <div className="flex items-center gap-1.5">
+              <h3
+                className={`truncate text-xs font-medium transition-colors ${
+                  selected ? 'text-white' : 'text-white/90 group-hover:text-white'
+                }`}
+              >
+                {task.title}
+              </h3>
+              {/* Active task subtle pulse marker */}
+              {task.status === 'active' && (
+                <span className="relative flex h-1.5 w-1.5 shrink-0">
+                  <span className="absolute inline-flex h-full w-full animate-pulse-ring rounded-full bg-brand-500 opacity-60" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-500" />
+                </span>
+              )}
+            </div>
+
+            {/* Muted meta/description line: 12px, low-opacity tone */}
+            <div className="mt-0.5 flex items-center gap-1.5 text-xs text-white/40">
+              {hasSource && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-white/50 shrink-0">
+                  <span className="h-1.5 w-1.5 rounded-full bg-brand-400/60" />
+                  {task.source}
+                </span>
+              )}
+              {hasSource && <span className="text-white/20">•</span>}
+              <span className="truncate text-white/40">{metaText}</span>
+            </div>
           </div>
-          <div className="flex items-center justify-between text-xs text-white/40">
-            <span>{duration}</span>
-            <span className="flex items-center gap-1">
-              <CircleCheckIcon className="h-1.5 w-1.5 fill-current text-brand-400/60" />
-              {eventCount} events
+
+          {/* Trailing edge: timestamp on top, provider icon below */}
+          <div className="flex shrink-0 flex-col items-end justify-between self-stretch pt-0.5 pl-1">
+            <span className="text-[10px] tabular-nums text-white/35">
+              {duration}
             </span>
+            {hasSource && (
+              <div className="mt-1 flex items-center">
+                <AppLogo appName={task.source} size="sm" className="h-3.5 w-3.5" />
+              </div>
+            )}
           </div>
-        </motion.button>
-      </HoverCard>
+        </div>
+      </motion.button>
     </motion.div>
   )
 }
@@ -336,9 +385,8 @@ function NewTaskModal(p: NewTaskModalProps) {
             {(['manual', 'ticket'] as const).map((t) => (
               <button
                 key={t}
-                className={`relative z-10 rounded-lg px-3 py-2 text-sm font-semibold capitalize transition-colors ${
-                  p.tab === t ? 'text-white' : 'text-white/50 hover:text-white/80'
-                }`}
+                className={`relative z-10 rounded-lg px-3 py-2 text-sm font-semibold capitalize transition-colors ${p.tab === t ? 'text-white' : 'text-white/50 hover:text-white/80'
+                  }`}
                 onClick={() => p.setTab(t)}
                 type="button"
               >
@@ -430,11 +478,10 @@ function NewTaskModal(p: NewTaskModalProps) {
                       {p.ticketSearchResults.map((ticket) => (
                         <button
                           key={ticket.id}
-                          className={`w-full rounded-xl border p-3 text-left text-sm transition-colors ${
-                            p.selectedTicket?.id === ticket.id
+                          className={`w-full rounded-xl border p-3 text-left text-sm transition-colors ${p.selectedTicket?.id === ticket.id
                               ? 'border-brand-500/40 bg-brand-500/10'
                               : 'border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05]'
-                          }`}
+                            }`}
                           onClick={() => p.selectTicket(ticket)}
                           type="button"
                         >
