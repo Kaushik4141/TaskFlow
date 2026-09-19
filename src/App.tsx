@@ -13,6 +13,7 @@ import TaskList from './components/TaskList'
 import Timeline from './components/Timeline'
 import ToastContainer from './components/Toast'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
+import { usePlatformShortcut } from './lib/platform'
 import { motion } from './lib/motion'
 import { useViewSwap } from './lib/motion'
 import { startTaskStoreListeners, useTaskStore } from './stores/taskStore'
@@ -66,6 +67,7 @@ export default function App() {
 
   const [helpOpen, setHelpOpen] = useState(false)
   const [sidebarView, setSidebarView] = useState<'tasks' | 'timeline'>('tasks')
+  const searchShortcut = usePlatformShortcut('k')
   const viewSwap = useViewSwap()
 
   const prevTaskIdRef = useRef<string | null>(null)
@@ -223,15 +225,16 @@ export default function App() {
               <div>
                 <button
                   type="button"
-                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm text-white/60 transition-colors hover:bg-white/[0.04] hover:text-white/90"
+                  aria-label={`Search documented tasks (${searchShortcut})`}
+                  className="group flex w-full items-center justify-between rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-2 text-sm text-white/70 shadow-sm transition-all hover:border-white/15 hover:bg-white/[0.06] hover:text-white"
                   onClick={() => setSearchOpen(true)}
                 >
                   <div className="flex items-center gap-2">
-                    <SearchIcon className="h-[18px] w-[18px]" />
-                    <span>Search</span>
+                    <SearchIcon className="h-4 w-4 text-white/45 transition-colors group-hover:text-white/75" />
+                    <span className="font-medium text-xs tracking-tight">Search</span>
                   </div>
-                  <kbd className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-medium text-white/40">
-                    ⌘K
+                  <kbd className="inline-flex items-center justify-center rounded-md border border-white/[0.12] bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] font-medium leading-none text-white/60 tracking-wider transition-colors group-hover:border-white/20 group-hover:text-white/80 select-none">
+                    {searchShortcut}
                   </kbd>
                 </button>
               </div>

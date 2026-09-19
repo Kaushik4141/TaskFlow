@@ -1,22 +1,23 @@
 import { motion } from 'framer-motion'
 import { CodeXmlIcon, XIcon } from '@animateicons/react/lucide'
 import { modalVariants, useStaggerContainer, useStaggerItem } from '../lib/motion'
+import { getModKey } from '../lib/platform'
 
 interface KeyboardShortcutsHelpProps {
   onClose: () => void
 }
 
-const shortcuts = [
-  { keys: ['⌘/Ctrl', 'K'], description: 'Open search' },
-  { keys: ['⌘/Ctrl', 'N'], description: 'New task' },
-  { keys: ['⌘/Ctrl', 'Enter'], description: 'Start / stop active task' },
-  { keys: ['⌘/Ctrl', ','], description: 'Open settings' },
-  { keys: ['⌘/Ctrl', 'E'], description: 'Export documentation' },
-  { keys: ['Esc'], description: 'Close any modal' },
-  { keys: ['?'], description: 'Show this help' },
-]
-
 export default function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
+  const modKey = getModKey()
+  const shortcuts = [
+    { keys: [modKey, 'K'], description: 'Open search' },
+    { keys: [modKey, 'N'], description: 'New task' },
+    { keys: [modKey, 'Enter'], description: 'Start / stop active task' },
+    { keys: [modKey, ','], description: 'Open settings' },
+    { keys: [modKey, 'E'], description: 'Export documentation' },
+    { keys: ['Esc'], description: 'Close any modal' },
+    { keys: ['?'], description: 'Show this help' },
+  ]
   const containerV = useStaggerContainer(0.04)
   const itemV = useStaggerItem()
 
