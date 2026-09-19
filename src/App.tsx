@@ -148,11 +148,10 @@ export default function App() {
               type="button"
               aria-label={settingsOpen ? 'Close settings' : 'Open settings'}
               title={settingsOpen ? 'Close settings' : 'Settings'}
-              className={`flex h-8 w-8 items-center justify-center rounded-xl transition-all ${
-                settingsOpen
+              className={`flex h-8 w-8 items-center justify-center rounded-xl transition-all ${settingsOpen
                   ? 'bg-brand-500/20 text-brand-200 ring-1 ring-brand-500/30 shadow-glow-sm'
                   : 'border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white'
-              }`}
+                }`}
               onClick={() => setSettingsOpen(!settingsOpen)}
             >
               <SettingsIcon className="h-4 w-4" />
@@ -211,7 +210,7 @@ export default function App() {
             className="relative flex shrink-0 flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-gradient-to-b from-brand-500/10 to-noir-900/50 backdrop-blur-md shadow-elevated cursor-grab active:cursor-grabbing"
           >
 
-            
+
             {/* Sidebar Header */}
             <div className="relative z-10 flex flex-col gap-5 p-5 pt-7">
               <div className="flex items-center">
@@ -219,7 +218,7 @@ export default function App() {
                   TaskFlow
                 </span>
               </div>
-              
+
               <div>
                 <button
                   type="button"
@@ -318,7 +317,7 @@ export default function App() {
                 </motion.div>
               )}
             </AnimatePresence>
-            </div>
+          </div>
         </div>
 
         {/* Overlays */}

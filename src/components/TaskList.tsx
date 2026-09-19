@@ -240,11 +240,10 @@ export function TaskRow({ task, selected, eventCount, onClick }: { task: Task; s
           type="button"
           variants={itemV}
           whileTap={{ scale: 0.99 }}
-          className={`relative w-full overflow-hidden rounded-xl border p-3 text-left transition-colors ${
-            selected
+          className={`relative w-full overflow-hidden rounded-xl border p-3 text-left transition-colors ${selected
               ? 'border-brand-500/40 bg-brand-500/[0.08]'
               : 'border-white/[0.06] bg-white/[0.015] hover:border-white/15 hover:bg-white/[0.04]'
-          }`}
+            }`}
           onClick={onClick}
         >
           {/* Shared-layout selection marker — slides between rows */}
@@ -336,9 +335,8 @@ function NewTaskModal(p: NewTaskModalProps) {
             {(['manual', 'ticket'] as const).map((t) => (
               <button
                 key={t}
-                className={`relative z-10 rounded-lg px-3 py-2 text-sm font-semibold capitalize transition-colors ${
-                  p.tab === t ? 'text-white' : 'text-white/50 hover:text-white/80'
-                }`}
+                className={`relative z-10 rounded-lg px-3 py-2 text-sm font-semibold capitalize transition-colors ${p.tab === t ? 'text-white' : 'text-white/50 hover:text-white/80'
+                  }`}
                 onClick={() => p.setTab(t)}
                 type="button"
               >
@@ -430,11 +428,10 @@ function NewTaskModal(p: NewTaskModalProps) {
                       {p.ticketSearchResults.map((ticket) => (
                         <button
                           key={ticket.id}
-                          className={`w-full rounded-xl border p-3 text-left text-sm transition-colors ${
-                            p.selectedTicket?.id === ticket.id
+                          className={`w-full rounded-xl border p-3 text-left text-sm transition-colors ${p.selectedTicket?.id === ticket.id
                               ? 'border-brand-500/40 bg-brand-500/10'
                               : 'border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05]'
-                          }`}
+                            }`}
                           onClick={() => p.selectTicket(ticket)}
                           type="button"
                         >

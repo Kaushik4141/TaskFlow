@@ -297,20 +297,18 @@ function PiecesRollupCard({
           onSelect?.()
         }
       }}
-      className={`group relative rounded-2xl border p-3.5 transition-all text-left w-full outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 cursor-pointer ${
-        isSelected
+      className={`group relative rounded-2xl border p-3.5 transition-all text-left w-full outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 cursor-pointer ${isSelected
           ? 'border-brand-500/80 bg-brand-500/[0.09] ring-1 ring-brand-500/40 shadow-lg shadow-brand-500/10'
           : 'border-white/[0.06] bg-white/[0.015] hover:border-white/15 hover:bg-white/[0.035]'
-      }`}
+        }`}
     >
       <div>
         {/* Top row: Pieces-style Document Icon + Title + Active Pill */}
         <div className="flex items-start gap-2.5">
           <CardDocIcon active={isSelected} />
           <h3
-            className={`line-clamp-2 min-w-0 flex-1 text-xs font-semibold leading-snug transition-colors ${
-              isSelected ? 'text-white font-semibold' : 'text-white/90 group-hover:text-white'
-            }`}
+            className={`line-clamp-2 min-w-0 flex-1 text-xs font-semibold leading-snug transition-colors ${isSelected ? 'text-white font-semibold' : 'text-white/90 group-hover:text-white'
+              }`}
           >
             {rollup.title}
           </h3>
@@ -324,11 +322,10 @@ function PiecesRollupCard({
         {/* Workstream Tag Pill & Inline preview expander button */}
         <div className="mt-1.5 pl-6 flex items-center justify-between">
           <span
-            className={`inline-block rounded-md border px-2 py-0.5 text-[10px] font-medium lowercase ${
-              isSelected
+            className={`inline-block rounded-md border px-2 py-0.5 text-[10px] font-medium lowercase ${isSelected
                 ? 'border-brand-500/40 bg-brand-500/20 text-brand-200'
                 : 'bg-white/[0.05] border-white/[0.06] text-white/60'
-            }`}
+              }`}
           >
             {workstream}
           </span>
@@ -418,9 +415,8 @@ function PiecesRollupCard({
 function CardDocIcon({ active }: { active?: boolean }) {
   return (
     <div
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded mt-0.5 transition-colors ${
-        active ? 'bg-brand-500 text-black' : 'bg-white/[0.06] text-white/60'
-      }`}
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded mt-0.5 transition-colors ${active ? 'bg-brand-500 text-black' : 'bg-white/[0.06] text-white/60'
+        }`}
     >
       <svg
         viewBox="0 0 24 24"
@@ -453,11 +449,10 @@ function FilterChip({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold transition-colors ${
-        active
+      className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold transition-colors ${active
           ? 'border border-brand-500/40 bg-brand-500/15 text-brand-200'
           : 'border border-white/[0.08] bg-white/[0.02] text-white/45 hover:border-white/[0.14] hover:text-white/70'
-      }`}
+        }`}
     >
       {label}
     </button>
