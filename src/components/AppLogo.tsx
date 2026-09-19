@@ -136,6 +136,53 @@ export default function AppLogo({ appName, size = 'sm', className = '' }: AppLog
     )
   }
 
+  // Clipboard
+  if (clean.includes('clipboard')) {
+    return (
+      <span
+        title="Clipboard"
+        className={`inline-flex shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/30 shadow-sm ${sizeClasses} ${className}`}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={svgSizes}
+        >
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+          <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+        </svg>
+      </span>
+    )
+  }
+
+  // Screen Capture / OCR
+  if (clean.includes('screen') || clean.includes('ocr')) {
+    return (
+      <span
+        title={appName}
+        className={`inline-flex shrink-0 items-center justify-center rounded-full bg-brand-500/20 text-brand-300 ring-1 ring-brand-500/30 shadow-sm ${sizeClasses} ${className}`}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={svgSizes}
+        >
+          <rect width="20" height="14" x="2" y="3" rx="2" />
+          <line x1="8" x2="16" y1="21" y2="21" />
+          <line x1="12" x2="12" y1="17" y2="21" />
+        </svg>
+      </span>
+    )
+  }
+
   // Generic colored initial badge fallback
   const colors = [
     'bg-brand-500/30 text-brand-200 ring-brand-500/40',

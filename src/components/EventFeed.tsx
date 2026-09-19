@@ -168,7 +168,7 @@ function EventRow({ event }: { event: Event }) {
         onClick={() => hasContent && setExpanded(!expanded)}
       >
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500/[0.08] text-brand-300 ring-1 ring-brand-500/10">
-          {event.eventType === 'window_switch' && event.appName ? (
+          {event.eventType === 'window_switch' && event.appName && event.appName.toLowerCase() !== 'unknown' ? (
             <span className="text-xs font-semibold">{event.appName[0]?.toUpperCase()}</span>
           ) : (
             <Icon className="h-4 w-4" />
@@ -176,7 +176,11 @@ function EventRow({ event }: { event: Event }) {
         </div>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
-            <p className="truncate text-xs font-semibold text-white/85">{event.appName ?? labelFor(event.eventType)}</p>
+            <p className="truncate text-xs font-semibold text-white/85">
+              {event.appName && event.appName.trim().toLowerCase() !== 'unknown'
+                ? event.appName
+                : labelFor(event.eventType, event.captureMethod)}
+            </p>
             {contentIcon(event.contentType)}
             <span className="rounded bg-white/5 px-1.5 py-0.2 text-[9px] uppercase tracking-wider text-white/40">
               {event.eventType.replace('_', ' ')}
@@ -264,7 +268,7 @@ function iconFor(type: Event['eventType']) {
   return CodeXmlIcon
 }
 
-function labelFor(type: Event['eventType']) {
+function labelFor(type: Event['eventType'], captureMethod?: string | null) {
   if (type === 'clipboard') {
     return 'Clipboard'
   }
@@ -273,6 +277,9 @@ function labelFor(type: Event['eventType']) {
   }
   if (type === 'url') {
     return 'URL'
+  }
+  if (captureMethod?.toLowerCase().includes('ocr')) {
+    return 'Screen OCR'
   }
   return 'Window'
 }

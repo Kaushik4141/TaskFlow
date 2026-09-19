@@ -29,11 +29,11 @@ use super::linux_reader::LinuxReader;
 use super::mac_reader::MacReader;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct WindowSnapshot {
-    app_name: String,
-    window_title: String,
-    platform_handle: isize,
-    pid: i32,
+pub(crate) struct WindowSnapshot {
+    pub app_name: String,
+    pub window_title: String,
+    pub platform_handle: isize,
+    pub pid: i32,
 }
 
 #[derive(Default)]
@@ -604,7 +604,7 @@ pub(crate) fn user_idle_for(_duration: Duration) -> bool {
 }
 
 #[cfg(windows)]
-fn active_window() -> Option<WindowSnapshot> {
+pub(crate) fn active_window() -> Option<WindowSnapshot> {
     use std::{ffi::OsString, os::windows::ffi::OsStringExt, ptr};
     use winapi::{
         shared::windef::HWND,
@@ -659,7 +659,7 @@ fn active_window() -> Option<WindowSnapshot> {
 }
 
 #[cfg(target_os = "linux")]
-fn active_window() -> Option<WindowSnapshot> {
+pub(crate) fn active_window() -> Option<WindowSnapshot> {
     LinuxReader::active_window().map(|window| WindowSnapshot {
         app_name: window.app_name,
         window_title: window.window_title,
@@ -669,7 +669,7 @@ fn active_window() -> Option<WindowSnapshot> {
 }
 
 #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-fn active_window() -> Option<WindowSnapshot> {
+pub(crate) fn active_window() -> Option<WindowSnapshot> {
     None
 }
 
@@ -697,7 +697,7 @@ unsafe fn window_text(hwnd: winapi::shared::windef::HWND) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn active_window() -> Option<WindowSnapshot> {
+pub(crate) fn active_window() -> Option<WindowSnapshot> {
     use objc2::rc::Id;
     use objc2_app_kit::NSWorkspace;
 

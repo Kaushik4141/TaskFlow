@@ -1254,6 +1254,27 @@ pub(crate) fn scored_from_event(event: &Event) -> ScoredEvent {
 pub(crate) const FALLBACK_REASON_NO_AI: &str =
     "AI summarization was unavailable; showing a local summary of captured events.";
 
+fn resolve_event_app_name(
+    app_name: Option<&str>,
+    event_type: &str,
+    capture_method: Option<&str>,
+) -> String {
+    if let Some(name) = app_name {
+        let trimmed = name.trim();
+        if !trimmed.is_empty() && !trimmed.eq_ignore_ascii_case("unknown") {
+            return trimmed.to_string();
+        }
+    }
+    match event_type {
+        "clipboard" => "Clipboard".to_string(),
+        "url" => "Browser".to_string(),
+        "note" => "Note".to_string(),
+        "screen_text" => "Screen Capture".to_string(),
+        _ if capture_method == Some("ocr") => "Screen OCR".to_string(),
+        _ => "Activity".to_string(),
+    }
+}
+
 pub(crate) fn fallback_summary(
     task: &Task,
     events: &[Event],
@@ -1280,7 +1301,11 @@ pub(crate) fn fallback_summary(
     ];
 
     for event in events {
-        let app_name = event.app_name.as_deref().unwrap_or("Unknown");
+        let app_name = resolve_event_app_name(
+            event.app_name.as_deref(),
+            &event.event_type,
+            event.capture_method.as_deref(),
+        );
         let detail = if event
             .capture_method
             .as_deref()

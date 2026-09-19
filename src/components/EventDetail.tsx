@@ -607,6 +607,17 @@ function RawEventRow({ event }: { event: Event }) {
     }
   }, [event.timestamp])
 
+  const appLabel = useMemo(() => {
+    if (event.appName && event.appName.trim().toLowerCase() !== 'unknown') {
+      return event.appName
+    }
+    if (event.eventType === 'clipboard') return 'Clipboard'
+    if (event.eventType === 'url') return 'Browser'
+    if (event.eventType === 'note') return 'Note'
+    if (event.captureMethod?.toLowerCase().includes('ocr')) return 'Screen OCR'
+    return 'Window'
+  }, [event.appName, event.eventType, event.captureMethod])
+
   return (
     <div className="py-2.5 text-xs transition-colors hover:bg-white/[0.015]">
       <div
@@ -615,8 +626,8 @@ function RawEventRow({ event }: { event: Event }) {
       >
         <div className="flex items-center gap-2.5 min-w-0">
           <span className="font-mono text-[11px] text-white/35 tabular-nums shrink-0">{timeStr}</span>
-          <AppLogo appName={event.appName || 'app'} size="sm" />
-          <span className="font-medium text-white/80 shrink-0">{event.appName || 'Unknown'}</span>
+          <AppLogo appName={appLabel} size="sm" />
+          <span className="font-medium text-white/80 shrink-0">{appLabel}</span>
           <span className="text-white/20 shrink-0">·</span>
           <span className="truncate text-white/60">{event.windowTitle || '(No window title)'}</span>
         </div>
@@ -844,16 +855,19 @@ function parseActivityLine(line: string): ActivityLine | null {
   // Match: **appName** `timestamp`: detail
   const m = trimmed.match(/^\*\*(.+?)\*\*\s*`(.+?)`:\s*(.*)$/)
   if (m) {
+    const rawApp = m[1].trim()
+    const appName =
+      !rawApp || rawApp.toLowerCase() === 'unknown' ? 'Activity' : rawApp
     return {
-      appName: m[1].trim(),
+      appName,
       timestamp: m[2].trim(),
       detail: m[3].trim(),
     }
   }
-  // Fallback: treat the whole line as detail with unknown app
+  // Fallback: treat the whole line as detail with Activity label
   if (trimmed.length > 0) {
     return {
-      appName: 'Unknown',
+      appName: 'Activity',
       timestamp: '',
       detail: trimmed,
     }

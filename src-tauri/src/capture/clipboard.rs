@@ -16,6 +16,8 @@ pub struct ClipboardChangedPayload {
     pub content: String,
     pub content_type: String,
     pub timestamp: String,
+    pub app_name: Option<String>,
+    pub window_title: Option<String>,
 }
 
 pub fn start(app: AppHandle, state: AppState) {
@@ -56,11 +58,48 @@ pub fn start(app: AppHandle, state: AppState) {
                     if !content.is_empty() && content != last_content {
                         last_content = content.clone();
 
+                        // Tier 1: Capture the currently-focused/foreground window at the moment of clipboard write
+                        let active_win = crate::capture::window_monitor::active_window();
+
+                        // Respect privacy rules if copying while an excluded window/app is focused (e.g. password manager)
+                        if let Some(ref win) = active_win {
+                            let allowed = state
+                                .privacy_filter
+                                .read()
+                                .map(|p| p.should_capture_window(&win.app_name, &win.window_title))
+                                .unwrap_or(true);
+                            if !allowed {
+                                thread::sleep(Duration::from_millis(500));
+                                continue;
+                            }
+                        }
+
+                        // Tier 2: Graceful fallback — if detection returns None or "Unknown", use "Clipboard"
+                        let (app_name, window_title) = match active_win {
+                            Some(win)
+                                if !win.app_name.is_empty()
+                                    && !win.app_name.eq_ignore_ascii_case("unknown") =>
+                            {
+                                let title = if win.window_title.is_empty() {
+                                    None
+                                } else {
+                                    Some(win.window_title)
+                                };
+                                (Some(win.app_name), title)
+                            }
+                            Some(win) if !win.window_title.is_empty() => {
+                                (Some("Clipboard".to_string()), Some(win.window_title))
+                            }
+                            _ => (Some("Clipboard".to_string()), None),
+                        };
+
                         let content_type = classify_content(&content);
                         let payload = ClipboardChangedPayload {
                             content: content.clone(),
                             content_type: content_type.clone(),
                             timestamp: Utc::now().to_rfc3339(),
+                            app_name: app_name.clone(),
+                            window_title: window_title.clone(),
                         };
 
                         let _ = app.emit("clipboard-changed", payload);
@@ -80,8 +119,8 @@ pub fn start(app: AppHandle, state: AppState) {
                                     &db,
                                     task_id,
                                     if url.is_some() { "url" } else { "clipboard" }.to_string(),
-                                    None,
-                                    None,
+                                    app_name,
+                                    window_title,
                                     Some(content),
                                     url,
                                     Some("ClipboardContent".to_string()),
