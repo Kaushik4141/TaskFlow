@@ -582,6 +582,133 @@ fn rollup_entry_markdown(clean_markdown: &str) -> String {
     cleaned.join("\n").trim().to_string()
 }
 
+/// Human-readable normalization for application names and reverse-DNS identifiers.
+fn clean_app_name(raw_app: &str) -> String {
+    let trimmed = raw_app.trim();
+    if trimmed.is_empty() {
+        return "Activity".to_string();
+    }
+    let stripped = trimmed.trim_end_matches(".exe").trim_end_matches(".app");
+    let lower = stripped.to_lowercase();
+    match lower.as_str() {
+        "com.mitchellh.ghostty" | "ghostty" => "Ghostty".to_string(),
+        "code-oss" | "code" | "vscode" => "VS Code".to_string(),
+        "cursor" => "Cursor".to_string(),
+        "org.kde.dolphin" | "dolphin" => "Dolphin".to_string(),
+        "org.mozilla.firefox" | "firefox" => "Firefox".to_string(),
+        "google-chrome" | "chrome" => "Chrome".to_string(),
+        "chromium" => "Chromium".to_string(),
+        "helium" => "Helium".to_string(),
+        "zen" | "zen-browser" => "Zen Browser".to_string(),
+        "vibe-typer" => "Vibe Typer".to_string(),
+        "alacritty" => "Alacritty".to_string(),
+        "kitty" => "Kitty".to_string(),
+        "foot" => "Foot".to_string(),
+        "wezterm" | "wezterm-gui" => "WezTerm".to_string(),
+        "org.gnome.terminal" | "terminal" => "Terminal".to_string(),
+        "slack" => "Slack".to_string(),
+        "discord" => "Discord".to_string(),
+        "obsidian" => "Obsidian".to_string(),
+        "notion" => "Notion".to_string(),
+        _ => {
+            if stripped.contains('.') {
+                if let Some(last) = stripped.split('.').next_back() {
+                    if last.len() > 1 {
+                        let mut chars = last.chars();
+                        if let Some(first) = chars.next() {
+                            return format!("{}{}", first.to_uppercase(), chars.as_str());
+                        }
+                    }
+                }
+            }
+            if stripped.contains('-') || stripped.contains('_') {
+                return stripped
+                    .split(&['-', '_'][..])
+                    .filter(|s| !s.is_empty())
+                    .map(|w| {
+                        let mut chars = w.chars();
+                        match chars.next() {
+                            Some(f) => format!("{}{}", f.to_uppercase(), chars.as_str()),
+                            None => String::new(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+            }
+            let mut chars = stripped.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+                None => stripped.to_string(),
+            }
+        }
+    }
+}
+
+/// Strip noise, notification counts, browser profile stamps,
+/// and editor cruft from raw window titles.
+fn clean_window_title(raw_title: &str) -> String {
+    let mut t = raw_title.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    // Strip notification badges: "(73) WhatsApp" -> "WhatsApp"
+    if t.starts_with('(') {
+        if let Some(closing) = t.find(')') {
+            let inside = &t[1..closing];
+            if inside.chars().all(|c| c.is_ascii_digit() || c == '+') {
+                t = t[closing + 1..].trim();
+            }
+        }
+    }
+    // Strip editor dirty indicators: "● foo.rs" -> "foo.rs"
+    t = t.trim_start_matches(|c| c == '●' || c == '*' || c == '•').trim();
+
+    // Strip editor git status "(Working Tree)"
+    let mut owned = t.to_string();
+    if let Some(idx) = owned.find("(Working Tree)") {
+        owned = format!("{}{}", &owned[..idx], &owned[idx + 14..]).trim().to_string();
+    }
+
+    // Strip trailing browser suffixes
+    let suffixes = [
+        " — Original profile — Mozilla Firefox",
+        " - Original profile - Mozilla Firefox",
+        " — Mozilla Firefox",
+        " - Mozilla Firefox",
+        " - Google Chrome",
+        " — Google Chrome",
+        " - Chromium",
+        " — Chromium",
+        " - Brave",
+        " — Brave",
+        " - Helium",
+        " — Helium",
+        " - Microsoft Edge",
+        " — Microsoft Edge",
+        " - Zen Browser",
+        " — Zen Browser",
+        " - Visual Studio Code",
+        " — Visual Studio Code",
+        " - Code - OSS",
+        " — Code - OSS",
+        " - Cursor",
+        " — Cursor",
+    ];
+
+    for suffix in suffixes {
+        let lower = owned.to_lowercase();
+        if let Some(idx) = lower.rfind(&suffix.to_lowercase()) {
+            owned = owned[..idx].trim().to_string();
+        }
+    }
+
+    if owned.ends_with(" ~") {
+        owned = owned[..owned.len() - 2].trim().to_string();
+    }
+
+    owned
+}
+
 /// Human title for a roll-up. Prefer the first substantive LLM key point
 /// (short, topical); fall back to "DominantApp — top window/domain".
 fn derive_title(generated: &SummarizeResponse, events: &[Event]) -> String {
@@ -594,7 +721,9 @@ fn derive_title(generated: &SummarizeResponse, events: &[Event]) -> String {
             && !trimmed.contains("without AI")
     });
     if let Some(point) = substantive {
-        return truncate_words(point.trim(), 70);
+        let pt = point.trim();
+        let cleaned = pt.trim_end_matches(',').trim();
+        return truncate_words(cleaned, 70);
     }
 
     let mut app_counts: std::collections::BTreeMap<String, usize> =
@@ -604,20 +733,34 @@ fn derive_title(generated: &SummarizeResponse, events: &[Event]) -> String {
             *app_counts.entry(app.to_string()).or_default() += 1;
         }
     }
-    let dominant_app = app_counts
+    let (raw_dominant, _) = app_counts
         .into_iter()
         .max_by_key(|(_, count)| *count)
-        .map(|(app, _)| app.trim_end_matches(".exe").to_string())
-        .unwrap_or_else(|| "Activity".to_string());
+        .unwrap_or_else(|| ("Activity".to_string(), 0));
 
-    let label = events
+    let dominant_app = clean_app_name(&raw_dominant);
+
+    // Prefer window title from events matching the dominant app
+    let dominant_events: Vec<&Event> = events
+        .iter()
+        .filter(|e| e.app_name.as_deref() == Some(&raw_dominant))
+        .collect();
+
+    let search_pool: &[&Event] = if !dominant_events.is_empty() {
+        &dominant_events
+    } else {
+        &events.iter().collect::<Vec<_>>()
+    };
+
+    let label = search_pool
         .iter()
         .find_map(|event| {
             event
                 .window_title
                 .as_deref()
+                .map(clean_window_title)
                 .filter(|title| !title.trim().is_empty())
-                .map(|title| truncate_words(title.trim(), 40))
+                .map(|title| truncate_words(&title, 45))
                 .or_else(|| {
                     event
                         .url
@@ -626,9 +769,23 @@ fn derive_title(generated: &SummarizeResponse, events: &[Event]) -> String {
                         .and_then(wiki::domain_from_url)
                 })
         })
+        .or_else(|| {
+            events.iter().find_map(|event| {
+                event
+                    .window_title
+                    .as_deref()
+                    .map(clean_window_title)
+                    .filter(|title| !title.trim().is_empty())
+                    .map(|title| truncate_words(&title, 45))
+            })
+        })
         .unwrap_or_else(|| format!("{} events", events.len()));
 
-    format!("{dominant_app} — {label}")
+    if label.to_lowercase().contains(&dominant_app.to_lowercase()) {
+        label
+    } else {
+        format!("{dominant_app} — {label}")
+    }
 }
 
 fn truncate_words(value: &str, max_chars: usize) -> String {
@@ -667,5 +824,63 @@ mod tests {
             "### app subsection demoted to #####: {body}"
         );
         assert!(body.contains("- editing rollup/mod.rs"), "bullets preserved: {body}");
+    }
+
+    #[test]
+    fn derive_title_cleans_reverse_dns_and_browser_noise() {
+        use super::{derive_title, clean_app_name, clean_window_title};
+        use crate::ai_client::SummarizeResponse;
+        use crate::database::events::Event;
+
+        assert_eq!(clean_app_name("com.mitchellh.ghostty"), "Ghostty");
+        assert_eq!(clean_app_name("code-oss"), "VS Code");
+        assert_eq!(clean_app_name("org.kde.dolphin"), "Dolphin");
+        assert_eq!(clean_app_name("org.mozilla.firefox"), "Firefox");
+
+        assert_eq!(
+            clean_window_title("(73) WhatsApp — Original profile — Mozilla Firefox"),
+            "WhatsApp"
+        );
+        assert_eq!(
+            clean_window_title("● linux_reader.rs (Working Tree) - Visual Studio Code"),
+            "linux_reader.rs"
+        );
+
+        let empty_gen = SummarizeResponse {
+            markdown: String::new(),
+            summary: String::new(),
+            key_points: vec![],
+            resources: vec![],
+            duration_seconds: None,
+            generated_locally: true,
+            method: None,
+        };
+
+        fn ev(app: Option<&str>, title: Option<&str>) -> Event {
+            Event {
+                id: "e1".to_string(),
+                task_id: "t1".to_string(),
+                event_type: "window_switch".to_string(),
+                app_name: app.map(str::to_string),
+                window_title: title.map(str::to_string),
+                content: None,
+                url: None,
+                content_type: None,
+                capture_method: None,
+                is_sanitized: 1,
+                chunk_index: 0,
+                relevance: 0.0,
+                timestamp: "2026-07-27T10:00:00+00:00".to_string(),
+                created_at: "2026-07-27T10:00:00+00:00".to_string(),
+            }
+        }
+
+        let event1 = ev(Some("com.mitchellh.ghostty"), Some("prep"));
+        let title = derive_title(&empty_gen, &[event1]);
+        assert_eq!(title, "Ghostty — prep");
+
+        let event2 = ev(Some("org.kde.dolphin"), Some("TaskFlow — Dolphin"));
+        let title2 = derive_title(&empty_gen, &[event2]);
+        assert_eq!(title2, "TaskFlow — Dolphin");
     }
 }

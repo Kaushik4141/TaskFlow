@@ -10,6 +10,7 @@ import type { Documentation as DocumentationRecord } from '../types'
 import { useTaskStore } from '../stores/taskStore'
 import { SkeletonDocument } from './Skeleton'
 import { useStaggerContainer, useStaggerItem } from '../lib/motion'
+import { cleanAppName, cleanWindowTitle } from '../lib/activityFormat'
 
 export default function Documentation({ documentation }: { documentation: DocumentationRecord }) {
   const { isGenerating, generateDocumentation, selectedTask } = useTaskStore()
@@ -283,7 +284,7 @@ export default function Documentation({ documentation }: { documentation: Docume
             <motion.section variants={itemV} className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5">
               <div className="mb-4 flex items-center gap-2">
                 <ActivityIcon className="h-4 w-4 text-brand-400" />
-                <h3 className="text-sm font-semibold uppercase tracking-[0.1em] text-white/65">Activity timeline</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-[0.1em] text-white/65">Activity Timeline</h3>
               </div>
               <ol className="relative space-y-3 border-l border-brand-500/20 pl-4">
                 {timeline.map((item, idx) => (
@@ -411,12 +412,14 @@ function extractTimeline(markdown: string): Array<{ text: string; meta?: string 
     const match = line.match(/^-\s+\*\*(.+?)\*\*\s+`([^`]+)`:?\s*(.*)$/)
     if (match) {
       const [, app, timestamp, detail] = match
+      const cApp = cleanAppName(app)
+      const cDetail = cleanWindowTitle(detail)
       items.push({
-        text: detail || app,
-        meta: `${app} \u00b7 ${timestamp}`,
+        text: cDetail || cApp,
+        meta: `${cApp} \u00b7 ${timestamp}`,
       })
     } else if (line.startsWith('- ')) {
-      items.push({ text: line.slice(2).trim() })
+      items.push({ text: cleanWindowTitle(line.slice(2).trim()) })
     }
   }
   return items

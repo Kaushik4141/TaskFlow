@@ -162,7 +162,7 @@ class LLMSummarizer:
         return {
             "markdown": markdown,
             "summary": self._extract_tldr(markdown),
-            "key_points": [],
+            "key_points": self._extract_key_points(markdown),
             "resources": context["resources"][:10],
             "generated_locally": mode == "local_ai",
             "mode": mode,
@@ -223,6 +223,22 @@ class LLMSummarizer:
             if in_tldr and line.strip():
                 return line.strip()
         return ""
+
+    def _extract_key_points(self, markdown: str) -> list[str]:
+        points = []
+        in_kp = False
+        for line in markdown.split("\n"):
+            trimmed = line.strip()
+            if "## Key Points" in trimmed or "## Key Highlights" in trimmed:
+                in_kp = True
+                continue
+            if in_kp and trimmed.startswith("##"):
+                break
+            if in_kp and (trimmed.startswith("-") or trimmed.startswith("*") or trimmed.startswith("•")):
+                cleaned = trimmed.lstrip("-*• ").strip()
+                if cleaned and len(cleaned) >= 8:
+                    points.append(cleaned)
+        return points
 
     def _format_dur(self, seconds: int) -> str:
         if seconds < 60:

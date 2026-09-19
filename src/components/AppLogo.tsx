@@ -1,3 +1,5 @@
+import { cleanAppName } from '../lib/activityFormat'
+
 interface AppLogoProps {
   appName: string
   size?: 'sm' | 'md' | 'lg'
@@ -5,7 +7,9 @@ interface AppLogoProps {
 }
 
 export default function AppLogo({ appName, size = 'sm', className = '' }: AppLogoProps) {
-  const clean = appName.toLowerCase().replace(/\.exe$/, '').trim()
+  const displayName = cleanAppName(appName)
+  const clean = displayName.toLowerCase()
+  const rawClean = (appName || '').toLowerCase().replace(/\.exe$/, '').trim()
 
   const sizeClasses = {
     sm: 'h-4 w-4',
@@ -25,11 +29,17 @@ export default function AppLogo({ appName, size = 'sm', className = '' }: AppLog
     lg: 'text-sm',
   }[size]
 
-  // Google Chrome
-  if (clean.includes('chrome')) {
+  // Google Chrome / Chromium / Helium / Zen / Browser
+  if (
+    clean.includes('chrome') ||
+    rawClean.includes('chrome') ||
+    clean.includes('chromium') ||
+    clean.includes('helium') ||
+    clean.includes('zen')
+  ) {
     return (
       <span
-        title="Google Chrome"
+        title={displayName}
         className={`inline-flex shrink-0 items-center justify-center rounded-full bg-white shadow-sm overflow-hidden ${sizeClasses} ${className}`}
       >
         <svg viewBox="0 0 24 24" className={size === 'sm' ? 'h-3.5 w-3.5' : size === 'md' ? 'h-5 w-5' : 'h-7 w-7'}>
@@ -44,15 +54,75 @@ export default function AppLogo({ appName, size = 'sm', className = '' }: AppLog
     )
   }
 
-  // VS Code / Cursor / IDE
-  if (clean.includes('code') || clean.includes('cursor')) {
+  // Mozilla Firefox
+  if (clean.includes('firefox') || rawClean.includes('firefox')) {
     return (
       <span
-        title={appName}
+        title="Firefox"
+        className={`inline-flex shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-[#FF3B30] to-[#FF9500] text-white shadow-sm ${sizeClasses} ${className}`}
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" className={svgSizes}>
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8 0-.55.06-1.09.17-1.61 1.05.51 2.24.81 3.51.81 2.21 0 4.19-.92 5.61-2.4 1.42 1.48 3.4 2.4 5.61 2.4 1.27 0 2.46-.3 3.51-.81.11.52.17 1.06.17 1.61 0 4.41-3.59 8-8 8z" />
+        </svg>
+      </span>
+    )
+  }
+
+  // VS Code / Cursor / IDE
+  if (clean.includes('code') || clean.includes('cursor') || rawClean.includes('code-oss')) {
+    return (
+      <span
+        title={displayName}
         className={`inline-flex shrink-0 items-center justify-center rounded-full bg-[#007ACC] text-white shadow-sm ${sizeClasses} ${className}`}
       >
         <svg viewBox="0 0 24 24" fill="currentColor" className={svgSizes}>
           <path d="M23.15 2.587L18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261A1 1 0 0 0 .32 8.653l3.65 3.344-3.65 3.345a1 1 0 0 0-.007 1.392l1.322 1.202a1 1 0 0 0 1.276.057l4.12-3.128 9.46 8.63a1.492 1.492 0 0 0 1.704.29l4.94-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zM18 13.48l-5.63-4.14 5.63-4.14v8.28z" />
+        </svg>
+      </span>
+    )
+  }
+
+  // Terminal / Ghostty / Kitty / Foot / Shell
+  if (
+    clean.includes('ghostty') ||
+    rawClean.includes('ghostty') ||
+    clean.includes('kitty') ||
+    clean.includes('foot') ||
+    clean.includes('terminal') ||
+    clean.includes('powershell') ||
+    clean.includes('cmd') ||
+    clean.includes('bash') ||
+    clean.includes('zsh') ||
+    clean.includes('wezterm') ||
+    clean.includes('alacritty') ||
+    clean.includes('warp')
+  ) {
+    return (
+      <span
+        title={displayName}
+        className={`inline-flex shrink-0 items-center justify-center rounded-full bg-black ring-1 ring-white/20 text-emerald-400 font-mono font-semibold shadow-sm ${sizeClasses} ${fontSizes} ${className}`}
+      >
+        &gt;_
+      </span>
+    )
+  }
+
+  // Dolphin / File Manager / Explorer / Nautilus
+  if (
+    clean.includes('dolphin') ||
+    rawClean.includes('dolphin') ||
+    clean.includes('explorer') ||
+    clean.includes('nautilus') ||
+    clean.includes('thunar') ||
+    clean.includes('finder')
+  ) {
+    return (
+      <span
+        title={displayName}
+        className={`inline-flex shrink-0 items-center justify-center rounded-full bg-sky-600 text-white shadow-sm ${sizeClasses} ${className}`}
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" className={svgSizes}>
+          <path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z" />
         </svg>
       </span>
     )
@@ -86,26 +156,6 @@ export default function AppLogo({ appName, size = 'sm', className = '' }: AppLog
     )
   }
 
-  // Terminal / Console
-  if (
-    clean.includes('terminal') ||
-    clean.includes('powershell') ||
-    clean.includes('cmd') ||
-    clean.includes('bash') ||
-    clean.includes('zsh') ||
-    clean.includes('wezterm') ||
-    clean.includes('alacritty')
-  ) {
-    return (
-      <span
-        title={appName}
-        className={`inline-flex shrink-0 items-center justify-center rounded-full bg-black ring-1 ring-white/20 text-emerald-400 font-mono font-semibold shadow-sm ${sizeClasses} ${fontSizes} ${className}`}
-      >
-        &gt;
-      </span>
-    )
-  }
-
   // Figma
   if (clean.includes('figma')) {
     return (
@@ -128,7 +178,7 @@ export default function AppLogo({ appName, size = 'sm', className = '' }: AppLog
   if (clean.includes('notion') || clean.includes('obsidian')) {
     return (
       <span
-        title={appName}
+        title={displayName}
         className={`inline-flex shrink-0 items-center justify-center rounded-full bg-white text-black font-serif font-black shadow-sm ${sizeClasses} ${fontSizes} ${className}`}
       >
         N
@@ -144,13 +194,13 @@ export default function AppLogo({ appName, size = 'sm', className = '' }: AppLog
     'bg-emerald-500/30 text-emerald-200 ring-emerald-500/40',
     'bg-purple-500/30 text-purple-200 ring-purple-500/40',
   ]
-  const charCode = clean.charCodeAt(0) || 0
+  const charCode = displayName.charCodeAt(0) || 0
   const colorClass = colors[charCode % colors.length]
-  const initial = (clean[0] || 'A').toUpperCase()
+  const initial = (displayName[0] || 'A').toUpperCase()
 
   return (
     <span
-      title={appName}
+      title={displayName}
       className={`inline-flex shrink-0 items-center justify-center rounded-full ring-1 font-semibold shadow-sm ${sizeClasses} ${fontSizes} ${colorClass} ${className}`}
     >
       {initial}

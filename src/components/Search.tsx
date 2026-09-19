@@ -14,6 +14,7 @@ import type { MemorySearchMatch, SearchResult } from '../types'
 import { useTaskStore } from '../stores/taskStore'
 import { modalVariants, useStaggerContainer, useStaggerItem } from '../lib/motion'
 import AppLogo from './AppLogo'
+import { formatActivityTitle } from '../lib/activityFormat'
 
 interface SearchProps {
   onClose: () => void
@@ -336,8 +337,11 @@ export default function Search({ onClose, onNavigate }: SearchProps) {
                               <span className="shrink-0 rounded-md bg-brand-500/20 px-2 py-0.5 text-[11px] font-medium text-brand-200">
                                 {result.projectSlug ? `[[Projects/${result.projectSlug}]]` : 'Inbox'}
                               </span>
-                              <p className="truncate text-sm font-semibold text-white/90 group-hover:text-brand-300 transition-colors">
-                                {result.title}
+                              <p
+                                className="truncate text-sm font-semibold text-white/90 group-hover:text-brand-300 transition-colors"
+                                title={formatActivityTitle(result.title)}
+                              >
+                                {formatActivityTitle(result.title)}
                               </p>
                             </div>
                             <span className="shrink-0 font-mono text-xs text-brand-400/80">

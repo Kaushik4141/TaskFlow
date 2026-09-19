@@ -15,6 +15,7 @@ import { useTaskStore } from '../stores/taskStore'
 import { selectionSpring, useStaggerContainer, useStaggerItem } from '../lib/motion'
 import AppLogo from './AppLogo'
 import TaskFlowLogo from './TaskFlowLogo'
+import { formatActivityTitle, cleanAppName } from '../lib/activityFormat'
 
 interface TimelineProps {
   taskId: string
@@ -60,7 +61,9 @@ export default function Timeline({ taskId, onBack }: { taskId: string; onBack?: 
       // Text search query filter
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim()
-        const titleMatch = rollup.title.toLowerCase().includes(query)
+        const titleMatch =
+          formatActivityTitle(rollup.title).toLowerCase().includes(query) ||
+          rollup.title.toLowerCase().includes(query)
         const summaryMatch = rollup.summaryMd.toLowerCase().includes(query)
         const workstreamMatch = (rollup.workstreamSlug ?? 'Inbox').toLowerCase().includes(query)
         const appsMatch = (rollup.apps ?? '').toLowerCase().includes(query)
@@ -130,11 +133,19 @@ export default function Timeline({ taskId, onBack }: { taskId: string; onBack?: 
           )}
         </div>
 
-        <div className="mt-1 flex items-baseline justify-between">
-          <h2 className="line-clamp-1 text-base font-semibold tracking-tight text-white">
-            {selectedTask?.title ?? 'Timeline'}
-          </h2>
-          <span className="text-[11px] text-white/35 tabular-nums">
+        <div className="mt-1.5 flex items-baseline justify-between">
+          <div className="min-w-0 flex-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-brand-400/90">
+              Activity Timeline
+            </span>
+            <h2
+              className="line-clamp-1 text-base font-semibold tracking-tight text-white"
+              title={selectedTask?.title ?? 'Activity Timeline'}
+            >
+              {selectedTask?.title ?? 'Timeline'}
+            </h2>
+          </div>
+          <span className="text-[11px] text-white/35 tabular-nums shrink-0 ml-2">
             {taskRollups.length} {taskRollups.length === 1 ? 'card' : 'cards'}
           </span>
         </div>
@@ -258,6 +269,7 @@ function PiecesRollupCard({
 }) {
   const cardRef = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState(false)
+  const cleanTitle = useMemo(() => formatActivityTitle(rollup.title), [rollup.title])
   const keyPoints = useMemo(() => parseJsonArray(rollup.keyPoints), [rollup.keyPoints])
   const apps = useMemo(() => parseJsonArray(rollup.apps), [rollup.apps])
   const workstream = rollup.workstreamSlug ?? 'Inbox'
@@ -316,6 +328,7 @@ function PiecesRollupCard({
         <div className="min-w-0 flex-1">
           {/* Title: single line, medium weight, truncate with ellipsis */}
           <h3
+            title={cleanTitle}
             className={`truncate text-xs font-medium transition-colors cursor-pointer ${
               isSelected ? 'text-white' : 'text-white/90 group-hover:text-white'
             }`}
@@ -324,7 +337,7 @@ function PiecesRollupCard({
               onSelect?.()
             }}
           >
-            {rollup.title}
+            {cleanTitle}
           </h3>
 
           {/* Muted meta/description line below: 12px, low-opacity tone */}
@@ -357,7 +370,7 @@ function PiecesRollupCard({
           {apps.length > 0 && (
             <div className="mt-1 flex items-center -space-x-1">
               {apps.slice(0, 3).map((app, idx) => (
-                <AppLogo key={`${app}-${idx}`} appName={app} size="sm" className="h-3.5 w-3.5 ring-1 ring-noir-900" />
+                <AppLogo key={`${app}-${idx}`} appName={cleanAppName(app)} size="sm" className="h-3.5 w-3.5 ring-1 ring-noir-900" />
               ))}
             </div>
           )}

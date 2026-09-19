@@ -19,6 +19,7 @@ import type { Event, Rollup } from '../types'
 import { useTaskStore } from '../stores/taskStore'
 import AppLogo from './AppLogo'
 import { useToastStore } from '../stores/toastStore'
+import { formatActivityTitle, cleanAppName, cleanWindowTitle } from '../lib/activityFormat'
 
 function ClockSvg({ className = 'h-3.5 w-3.5' }: { className?: string }) {
   return (
@@ -69,6 +70,7 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
   const apps = useMemo(() => parseJsonArray(rollup.apps), [rollup.apps])
   const resources = useMemo(() => parseJsonArray(rollup.resources), [rollup.resources])
   const workstream = rollup.workstreamSlug ?? 'Inbox'
+  const cleanTitle = useMemo(() => formatActivityTitle(rollup.title), [rollup.title])
 
   // Parse summaryMd into structured sections for visual hierarchy
   const parsedSummary = useMemo(() => parseSummaryMd(rollup.summaryMd), [rollup.summaryMd])
@@ -172,7 +174,7 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
   // Copy full Markdown representation
   const handleCopyMarkdown = async () => {
     const mdLines = [
-      `# ${rollup.title}`,
+      `# ${cleanTitle}`,
       `> **Workstream**: ${workstream} | **Time**: ${timeRange} (${relativeTime})`,
       '',
       '## Summary',
@@ -199,7 +201,7 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
 
   // Export as Markdown file
   const handleExportMarkdown = () => {
-    const safeTitle = (rollup.title || 'event-summary').toLowerCase().replace(/[^a-z0-9_-]/g, '-')
+    const safeTitle = (cleanTitle || 'event-summary').toLowerCase().replace(/[^a-z0-9_-]/g, '-')
     const blob = new Blob([rollup.summaryMd], { type: 'text/markdown;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -240,8 +242,8 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
           <span className="text-white/20">/</span>
 
           <div className="flex items-center gap-2 truncate">
-            <span className="text-xs font-semibold text-brand-300 truncate">
-              {rollup.title}
+            <span className="text-xs font-semibold text-brand-300 truncate" title={cleanTitle}>
+              {cleanTitle}
             </span>
             <span className="rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-0.5 text-[10px] font-medium text-white/50">
               {workstream}
@@ -342,7 +344,8 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-2 max-w-3xl">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center rounded-md bg-brand-500/15 border border-brand-500/30 px-2.5 py-0.5 text-xs font-medium text-brand-200">
+                <span className="inline-flex items-center gap-1 rounded-md bg-brand-500/15 border border-brand-500/30 px-2.5 py-0.5 text-xs font-medium text-brand-200">
+                  <ActivityIcon className="h-3 w-3" />
                   {workstream}
                 </span>
                 <span className="flex items-center gap-1 text-xs text-white/50">
@@ -356,7 +359,7 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
               </div>
 
               <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl leading-snug">
-                {rollup.title}
+                {cleanTitle}
               </h1>
             </div>
 
@@ -615,10 +618,10 @@ function RawEventRow({ event }: { event: Event }) {
       >
         <div className="flex items-center gap-2.5 min-w-0">
           <span className="font-mono text-[11px] text-white/35 tabular-nums shrink-0">{timeStr}</span>
-          <AppLogo appName={event.appName || 'app'} size="sm" />
-          <span className="font-medium text-white/80 shrink-0">{event.appName || 'Unknown'}</span>
+          <AppLogo appName={cleanAppName(event.appName || 'app')} size="sm" />
+          <span className="font-medium text-white/80 shrink-0">{cleanAppName(event.appName || 'Unknown')}</span>
           <span className="text-white/20 shrink-0">·</span>
-          <span className="truncate text-white/60">{event.windowTitle || '(No window title)'}</span>
+          <span className="truncate text-white/60">{cleanWindowTitle(event.windowTitle) || '(No window title)'}</span>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -881,10 +884,10 @@ function SummaryActivityRow({ line }: { line: ActivityLine }) {
         {timeStr && (
           <span className="font-mono text-[11px] text-white/35 tabular-nums shrink-0">{timeStr}</span>
         )}
-        <AppLogo appName={line.appName} size="sm" />
-        <span className="font-medium text-white/80 shrink-0">{line.appName}</span>
+        <AppLogo appName={cleanAppName(line.appName)} size="sm" />
+        <span className="font-medium text-white/80 shrink-0">{cleanAppName(line.appName)}</span>
         <span className="text-white/20 shrink-0">·</span>
-        <span className="truncate text-white/60">{line.detail || '(No detail)'}</span>
+        <span className="truncate text-white/60">{cleanWindowTitle(line.detail) || '(No detail)'}</span>
       </div>
     </div>
   )
