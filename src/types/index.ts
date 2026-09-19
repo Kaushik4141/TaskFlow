@@ -170,7 +170,30 @@ export interface ProjectCandidate {
   ready: boolean
 }
 
-export interface SearchResult {  taskId: string
+export interface MemorySearchMatch {
+  rollupId: string
+  taskId: string
+  title: string
+  projectSlug: string | null
+  windowStart: string
+  windowEnd: string
+  summaryMd: string
+  keyPoints: string[]
+  connectedTools: string[]
+  connectedSites: string[]
+  dailyNoteLink: string
+  score: number
+}
+
+export interface MemorySearchResponse {
+  query: string
+  answer: string | null
+  scopedCount: number
+  results: MemorySearchMatch[]
+}
+
+export interface SearchResult {
+  taskId: string
   taskTitle: string
   matchedSnippet: string
   relevanceScore: number

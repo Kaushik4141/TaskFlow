@@ -2001,6 +2001,120 @@ pub async fn query_graph_memory(
     .map_err(|err| format!("Graph memory retrieval failed: {err}"))
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemorySearchResponse {
+    pub query: String,
+    pub answer: Option<String>,
+    pub scoped_count: usize,
+    pub results: Vec<crate::database::retrieval::ScoredMemoryResult>,
+}
+
+#[tauri::command]
+pub async fn search_memory(
+    state: State<'_, AppState>,
+    query: String,
+    project: Option<String>,
+    limit: Option<usize>,
+) -> Result<MemorySearchResponse, String> {
+    let query_trimmed = query.trim();
+    if query_trimmed.is_empty() {
+        return Ok(MemorySearchResponse {
+            query: String::new(),
+            answer: None,
+            scoped_count: 0,
+            results: Vec::new(),
+        });
+    }
+
+    let req = crate::database::retrieval::GraphQueryRequest {
+        query: Some(query_trimmed.to_string()),
+        project: project.filter(|p| !p.trim().is_empty()),
+        time_bucket: None,
+        start_date: None,
+        end_date: None,
+        limit: limit.or(Some(10)),
+    };
+
+    let graph_res = crate::database::retrieval::query_graph_memory(&state.db, req)
+        .await
+        .map_err(|err| format!("Memory search failed: {err}"))?;
+
+    if graph_res.results.is_empty() {
+        return Ok(MemorySearchResponse {
+            query: query_trimmed.to_string(),
+            answer: Some("No recorded activity found matching your question.".to_string()),
+            scoped_count: 0,
+            results: Vec::new(),
+        });
+    }
+
+    let mut answer: Option<String> = None;
+
+    if state.sidecar_ready.load(Ordering::SeqCst) {
+        if let Ok(settings) = load_summary_settings(&state.db, true).await {
+            let ask_req = crate::ai_client::AskMemoryRequest {
+                query: query_trimmed.to_string(),
+                context: Some(graph_res.context_summary.clone()),
+                project: None,
+                mode: Some(settings.mode),
+                cloud_base_url: Some(settings.cloud_base_url),
+                cloud_api_key: Some(settings.cloud_api_key),
+                cloud_model: Some(settings.cloud_model),
+                ollama_url: Some(settings.ollama_url),
+                ollama_model: Some(settings.ollama_model),
+            };
+
+            if let Ok(resp) = state.ai_client.ask_memory(&ask_req).await {
+                if !resp.answer.trim().is_empty() {
+                    answer = Some(resp.answer);
+                }
+            }
+        }
+    }
+
+    if answer.is_none() {
+        let top = &graph_res.results[0];
+        let date_str = top.window_end.chars().take(10).collect::<String>();
+        let proj = top.project_slug.as_deref().unwrap_or("Inbox");
+        let tools = if top.connected_tools.is_empty() {
+            "None".to_string()
+        } else {
+            top.connected_tools.join(", ")
+        };
+        let summary_clean = top.title.trim();
+
+        let mut fallback = format!(
+            "Based on your recorded memory for **{}**, you worked on **[[Projects/{}]]** ({}). Tools referenced: {}.",
+            date_str, proj, summary_clean, tools
+        );
+
+        if graph_res.results.len() > 1 {
+            let mut other_projs: Vec<&str> = graph_res.results[1..]
+                .iter()
+                .filter_map(|r| r.project_slug.as_deref())
+                .filter(|p| *p != proj)
+                .collect();
+            other_projs.sort();
+            other_projs.dedup();
+            if !other_projs.is_empty() {
+                fallback.push_str(&format!(
+                    " Other active projects in this timeframe include **{}**.",
+                    other_projs.join(", ")
+                ));
+            }
+        }
+        answer = Some(fallback);
+    }
+
+    Ok(MemorySearchResponse {
+        query: query_trimmed.to_string(),
+        answer,
+        scoped_count: graph_res.scoped_count,
+        results: graph_res.results,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

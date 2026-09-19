@@ -27,6 +27,8 @@ from models import (
     SummarizeResponse,
     QueryMemoryRequest,
     SessionRequest,
+    AskMemoryRequest,
+    AskMemoryResponse,
 )
 
 embedder = None
@@ -224,6 +226,91 @@ async def api_query_memory(request: QueryMemoryRequest):
         end_date=request.end_date,
         limit=request.limit,
     )
+
+
+@app.post("/ask_memory", response_model=AskMemoryResponse)
+async def api_ask_memory(request: AskMemoryRequest):
+    """Answer recorded questions across the user's graph memory."""
+    from mcp_server import tool_query_graph_memory
+
+    memory = tool_query_graph_memory(
+        query=request.query,
+        project=request.project,
+        limit=5,
+    )
+
+    results = memory.get("results", [])
+    context_summary = request.context if request.context else memory.get("context_summary", "")
+    scoped_count = memory.get("scoped_count", len(results))
+
+    if not results:
+        return {
+            "query": request.query,
+            "answer": "No recorded activity found matching your question.",
+            "scoped_count": 0,
+            "results": [],
+        }
+
+    answer = None
+    if request.mode in ("local_ai", "cloud_ai") and llm_summarizer:
+        try:
+            prompt = (
+                f"You are the TaskFlow memory engine. Answer this user's question concisely in 2-3 sentences "
+                f"using ONLY the recorded desktop memory context below. Mention dates, projects, tools, and actions.\n\n"
+                f"Question: {request.query}\n\n"
+                f"Memory Context:\n{context_summary}\n\n"
+                f"Answer:"
+            )
+            if request.mode == "cloud_ai" and request.cloud_base_url and request.cloud_api_key:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        f"{request.cloud_base_url.rstrip('/')}/chat/completions",
+                        headers={"Authorization": f"Bearer {request.cloud_api_key}"},
+                        json={
+                            "model": request.cloud_model or "gpt-4o-mini",
+                            "messages": [{"role": "user", "content": prompt}],
+                            "max_tokens": 250,
+                            "temperature": 0.2,
+                        },
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        answer = data["choices"][0]["message"]["content"].strip()
+            elif request.mode == "local_ai" and request.ollama_url:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        f"{request.ollama_url.rstrip('/')}/api/generate",
+                        json={
+                            "model": request.ollama_model or "llama3.1:8b",
+                            "prompt": prompt,
+                            "stream": False,
+                        },
+                    )
+                    if resp.status_code == 200:
+                        answer = resp.json().get("response", "").strip()
+        except Exception as e:
+            print(f"[ask_memory] LLM answer generation failed: {e}", flush=True)
+
+    if not answer:
+        top = results[0]
+        date_str = top.get("window_end", "")[:10]
+        proj = top.get("project_slug") or "Inbox"
+        tools = ", ".join(top.get("connected_tools", [])) or "None"
+        summary_clean = top.get("title", "").strip()
+
+        answer = f"Based on your recorded memory for **{date_str}**, you worked on **[[Projects/{proj}]]** ({summary_clean}). Tools referenced: {tools}."
+        if len(results) > 1:
+            other_projs = list({r.get("project_slug") for r in results[1:] if r.get("project_slug") and r.get("project_slug") != proj})
+            if other_projs:
+                answer += f" Other active projects in this timeframe include **{', '.join(other_projs)}**."
+
+    return {
+        "query": request.query,
+        "answer": answer,
+        "scoped_count": scoped_count,
+        "results": results,
+    }
+
 
 
 @app.get("/manifest")

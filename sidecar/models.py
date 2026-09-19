@@ -93,3 +93,22 @@ class SessionRequest(BaseModel):
     refresh_token: Optional[str] = None
 
 
+class AskMemoryRequest(BaseModel):
+    query: str
+    context: Optional[str] = None
+    project: Optional[str] = None
+    mode: Optional[str] = "basic"
+    cloud_base_url: Optional[str] = None
+    cloud_api_key: Optional[str] = None
+    cloud_model: Optional[str] = None
+    ollama_url: Optional[str] = "http://localhost:11434"
+    ollama_model: Optional[str] = "llama3.1:8b"
+
+
+class AskMemoryResponse(BaseModel):
+    query: str
+    answer: str
+    scoped_count: int
+    results: list[dict] = []
+
+
