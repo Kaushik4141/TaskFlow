@@ -15,6 +15,7 @@ use crate::{capture::types::ContentType, database, AppState, CaptureFailure, Wor
 use super::{
     chunker::chunk_content,
     cleaner::{clean_captured_content, is_meaningful_content},
+    signal_density,
     types::CapturedContent,
     url_extractor,
     work_classifier,
@@ -289,11 +290,38 @@ fn spawn_deep_capture(
         }
 
         captured.text = captured.text.as_deref().map(clean_captured_content);
-        if captured
+        let had_text = captured.text.is_some();
+        let is_meaningful = captured
             .text
             .as_deref()
-            .is_some_and(|content| !is_meaningful_content(content))
-        {
+            .map(is_meaningful_content)
+            .unwrap_or(false);
+
+        let has_work_signal = captured
+            .text
+            .as_deref()
+            .map(|content| {
+                signal_density::has_work_signal(
+                    content,
+                    &captured.app_name,
+                    &captured.window_title,
+                    &captured.content_type,
+                    captured.url.as_deref(),
+                )
+            })
+            .unwrap_or(false);
+
+        if !is_meaningful || !has_work_signal {
+            if had_text && !has_work_signal {
+                eprintln!(
+                    "[taskflow:capture] Dropped low work-signal content for: {} - {}",
+                    captured.app_name, captured.window_title
+                );
+                log::debug!(
+                    "Dropped low work-signal content for: {} - {}",
+                    captured.app_name, captured.window_title
+                );
+            }
             captured.text = None;
         }
 
@@ -314,6 +342,27 @@ fn spawn_deep_capture(
 
         let db = state.db.clone();
         tauri::async_runtime::spawn(async move {
+            if had_text
+                && !has_work_signal
+                && matches!(
+                    captured.content_type,
+                    ContentType::BrowserContent | ContentType::GenericContent
+                )
+            {
+                if let Some(event_id) = title_event_id {
+                    eprintln!(
+                        "[taskflow:capture] Purging non-work event row {} for {} - {}",
+                        event_id, captured.app_name, captured.window_title
+                    );
+                    log::debug!(
+                        "Purging non-work event row {} for {} - {}",
+                        event_id, captured.app_name, captured.window_title
+                    );
+                    let _ = database::events::delete_event(&db, &event_id).await;
+                }
+                return;
+            }
+
             let window_key = format!("{}:{}", captured.app_name, captured.window_title);
             if let Some(content) = captured.text.as_deref() {
                 let new_hash = content_hash(content);

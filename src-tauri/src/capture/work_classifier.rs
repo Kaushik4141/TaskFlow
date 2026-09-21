@@ -14,6 +14,25 @@ const DUAL_USE_DOMAINS: &[&str] = &[
     "twitter.com",
     "x.com",
     "twitch.tv",
+    // Social media & short-form
+    "instagram.com",
+    "tiktok.com",
+    "facebook.com",
+    "threads.net",
+    "pinterest.com",
+    // Shopping & e-commerce
+    "flipkart.com",
+    "amazon.com",
+    "amazon.in",
+    "ebay.com",
+    "myntra.com",
+    "aliexpress.com",
+    // Streaming entertainment
+    "netflix.com",
+    "hulu.com",
+    "disneyplus.com",
+    "hotstar.com",
+    "primevideo.com",
 ];
 
 const DUAL_USE_TITLE_INDICATORS: &[&str] = &[
@@ -22,6 +41,19 @@ const DUAL_USE_TITLE_INDICATORS: &[&str] = &[
     "twitter",
     " / x",
     "twitch",
+    "instagram",
+    "tiktok",
+    "facebook",
+    "pinterest",
+    "flipkart",
+    "amazon",
+    "ebay",
+    "myntra",
+    "shopping",
+    "netflix",
+    "hulu",
+    "disney+",
+    "prime video",
 ];
 
 /// Clear entertainment/leisure disqualifiers. If present on a dual-use platform,
@@ -30,6 +62,26 @@ const LEISURE_KEYWORDS: &[&str] = &[
     // Shorts & short-form video feeds
     "/shorts/",
     "#shorts",
+    "/reels/",
+    "reels",
+    "/stories/",
+    "stories",
+    "explore",
+    // E-commerce & Shopping
+    "buy online",
+    "buy now",
+    "add to cart",
+    "proceed to checkout",
+    "shopping cart",
+    "price in ",
+    "best price",
+    "best offers",
+    "order summary",
+    "in stock",
+    "free delivery",
+    "free shipping",
+    "wishlist",
+    "deals of the day",
     // Gaming & Let's plays
     "gameplay",
     "walkthrough",

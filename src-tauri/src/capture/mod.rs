@@ -2,6 +2,7 @@ pub mod chunker;
 pub mod cleaner;
 pub mod clipboard;
 pub mod privacy;
+pub mod signal_density;
 pub mod types;
 pub mod url_extractor;
 pub mod window_monitor;

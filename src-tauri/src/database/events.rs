@@ -351,3 +351,13 @@ async fn get_event_by_id(db: &SqlitePool, id: &str) -> Result<Event, sqlx::Error
     .fetch_one(db)
     .await
 }
+
+/// Deletes an event and any associated record by id.
+pub async fn delete_event(db: &SqlitePool, id: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM events WHERE id = ?1")
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+

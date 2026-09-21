@@ -20,6 +20,9 @@ class ContextBuilder:
         r"^\s*[-_|•●○◆]\s*$",
         r"^(\d+)\s*$",
         r"^[^a-zA-Z]*$",
+        r"^(like|likes|liked|share|shares|comment|comments|subscribe|subscribed|follow|following|reels|shorts)$",
+        r"^(suggested for you|see all|view all comments|add a comment|photo by|video by|posted by)$",
+        r"^(proceed to checkout|add to cart|buy now|in stock|free shipping|free delivery)$",
     ]
 
     SECRET_PATTERNS = [
