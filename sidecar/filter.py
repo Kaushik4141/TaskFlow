@@ -52,13 +52,69 @@ class TaskRelevanceFilter:
             print("FILTER FALLBACK: embedding model unavailable", flush=True)
             task_vector = None
         keywords = self.extract_request_keywords(request)
-        scored_events = [
-            self.evaluate_event(event, task_vector, keywords)
-            for event in request.events
-        ]
-        relevant_count = sum(1 for event in scored_events if event.included)
+
+        scored_events: list[ScoredEvent | None] = [None] * len(request.events)
+        needs_embedding_indices: list[int] = []
+        needs_embedding_texts: list[str] = []
+
+        for idx, event in enumerate(request.events):
+            app_lower = (event.app_name or "").lower()
+
+            if any(excluded in app_lower for excluded in EXCLUDED_APPS):
+                scored_events[idx] = self.to_scored_event(event, 0.0, "excluded_app", False)
+                continue
+
+            event_text = self.build_event_text(event)
+            if not event_text.strip():
+                scored_events[idx] = self.to_scored_event(event, 0.0, "empty_event", False)
+                continue
+
+            event_lower = event_text.lower()
+            keyword_hits = sum(1 for keyword in keywords if keyword in event_lower)
+
+            if keyword_hits >= 2:
+                scored_events[idx] = self.to_scored_event(event, 0.85, f"keyword_match:{keyword_hits}", True)
+                continue
+
+            if task_vector is None:
+                app_trust = self.get_threshold(app_lower)
+                included = keyword_hits >= 1 or app_trust <= 0.30
+                score = 0.85 if keyword_hits >= 1 else 0.60 if app_trust <= 0.15 else 0.50
+                scored_events[idx] = self.to_scored_event(
+                    event,
+                    score,
+                    f"keyword_fallback:{keyword_hits}",
+                    included,
+                )
+                continue
+
+            needs_embedding_indices.append(idx)
+            needs_embedding_texts.append(event_text)
+
+        # Batch embed all events requiring semantic comparison in one single forward pass
+        if needs_embedding_indices and task_vector is not None:
+            vectors = self.embedder.embed_batch(needs_embedding_texts)
+            for idx, event_vector in zip(needs_embedding_indices, vectors):
+                event = request.events[idx]
+                app_lower = (event.app_name or "").lower()
+                similarity = self.embedder.cosine_similarity(task_vector, event_vector)
+                threshold = self.get_threshold(app_lower)
+                if event.content:
+                    threshold = max(0.05, threshold - 0.05)
+                if event.capture_method == "title_only":
+                    threshold += 0.05
+                included = similarity >= threshold
+                scored_events[idx] = self.to_scored_event(
+                    event,
+                    round(similarity, 4),
+                    f"semantic:{similarity:.2f}",
+                    included,
+                )
+
+        final_scored_events = [se for se in scored_events if se is not None]
+        relevant_count = sum(1 for event in final_scored_events if event.included)
         return FilterResponse(
-            scored_events=scored_events,
+            scored_events=final_scored_events,
             total_events=len(request.events),
             relevant_count=relevant_count,
             filter_threshold=0.35,

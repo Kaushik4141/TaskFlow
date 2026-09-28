@@ -491,7 +491,7 @@ fn should_deep_capture(
     changed
         || last_deep_read
             .get(window_key)
-            .map(|instant| instant.elapsed() >= Duration::from_secs(30))
+            .map(|instant| instant.elapsed() >= Duration::from_secs(90))
             .unwrap_or(true)
 }
 
@@ -625,6 +625,7 @@ pub(crate) fn user_idle_for(duration: Duration) -> bool {
 
 #[cfg(target_os = "linux")]
 pub(crate) fn user_idle_for(duration: Duration) -> bool {
+    // 1. Try xprintidle (works under X11 / XWayland if installed)
     if let Ok(output) = std::process::Command::new("xprintidle").output() {
         if output.status.success() {
             let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -634,25 +635,48 @@ pub(crate) fn user_idle_for(duration: Duration) -> bool {
         }
     }
 
+    // 2. Try loginctl show-session auto -p IdleHint (standard systemd logind under Wayland & Hyprland)
+    if let Ok(output) = std::process::Command::new("loginctl")
+        .args(["show-session", "auto", "-p", "IdleHint"])
+        .output()
+    {
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            if text.contains("IdleHint=yes") {
+                return true;
+            }
+            if text.contains("IdleHint=no") {
+                return false;
+            }
+        }
+    }
+
+    // 3. Try busctl on the system bus for org.freedesktop.login1 Manager IdleHint
     if let Ok(output) = std::process::Command::new("busctl")
         .args([
-            "--user",
+            "--system",
             "get-property",
             "org.freedesktop.login1",
-            "/org/freedesktop/login1/session/self",
-            "org.freedesktop.login1.Session",
+            "/org/freedesktop/login1",
+            "org.freedesktop.login1.Manager",
             "IdleHint",
         ])
         .output()
     {
         if output.status.success() {
-            return String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .eq_ignore_ascii_case("true");
+            let text = String::from_utf8_lossy(&output.stdout);
+            if text.contains("true") {
+                return true;
+            }
+            if text.contains("false") {
+                return false;
+            }
         }
     }
 
-    true
+    // Safe fallback: when idle state cannot be determined, assume user is ACTIVE (false).
+    // Assuming idle (true) causes rapid 2-minute rollup loops and continuous deep captures.
+    false
 }
 
 #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]

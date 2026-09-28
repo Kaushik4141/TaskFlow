@@ -1,7 +1,16 @@
-from __future__ import annotations
-
+import os
 import threading
 from typing import ClassVar
+
+# Enforce strict CPU thread limits to prevent PyTorch from saturating all laptop cores
+os.environ["OMP_NUM_THREADS"] = "2"
+os.environ["MKL_NUM_THREADS"] = "2"
+
+try:
+    import torch
+    torch.set_num_threads(2)
+except Exception:
+    pass
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
@@ -22,9 +31,14 @@ class Embedder:
     def __init__(self) -> None:
         if self._initialized:
             return
+        try:
+            import torch
+            torch.set_num_threads(2)
+        except Exception:
+            pass
         self.model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
         self._initialized = True
-        print("Embedding model loaded", flush=True)
+        print("Embedding model loaded (CPU threads clamped to 2)", flush=True)
 
     def embed(self, text: str) -> list[float]:
         vector = self.model.encode(text or "", normalize_embeddings=True)

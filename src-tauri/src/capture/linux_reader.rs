@@ -108,6 +108,7 @@ impl LinuxReader {
             Command::new("grim")
                 .arg("-g")
                 .arg(geometry)
+                .args(["-l", "1"])
                 .arg("-")
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -140,6 +141,7 @@ impl LinuxReader {
         let mut image = screenshot.stdout.take()?;
 
         let mut tesseract = Command::new("tesseract")
+            .env("OMP_THREAD_LIMIT", "2")
             .arg("stdin")
             .arg("stdout")
             .stdin(Stdio::piped())
