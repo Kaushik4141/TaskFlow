@@ -3,7 +3,7 @@
     "taskflow-synthetic": {
       "command": "python3",
       "args": [
-        "/home/kaushi/Projects/TaskFlow/sidecar/mcp_server.py"
+        "/home/kaushi/Projects/TaskFlow/mcp-cloud/mcp_server.py"
       ],
       "env": {
         "TASKFLOW_VAULT": "/home/kaushi/Documents/SyntheticVault",

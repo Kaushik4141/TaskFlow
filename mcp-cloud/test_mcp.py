@@ -15,9 +15,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-sidecar_dir = Path(__file__).parent.resolve()
-if str(sidecar_dir) not in sys.path:
-    sys.path.insert(0, str(sidecar_dir))
+mcp_dir = Path(__file__).parent.resolve()
+if str(mcp_dir) not in sys.path:
+    sys.path.insert(0, str(mcp_dir))
 
 import mcp_server
 
@@ -136,7 +136,7 @@ month: "09"
 
 def test_mcp_stdio_protocol():
     print("\n=== Testing MCP JSON-RPC 2.0 Stdio Protocol ===")
-    server_script = str(sidecar_dir / "mcp_server.py")
+    server_script = str(mcp_dir / "mcp_server.py")
 
     proc = subprocess.Popen(
         [sys.executable, server_script],

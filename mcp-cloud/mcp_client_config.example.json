@@ -9,7 +9,7 @@
         "taskflow": {
           "command": "python3",
           "args": [
-            "/home/kaushi/Projects/TaskFlow/sidecar/mcp_server.py"
+            "/home/kaushi/Projects/TaskFlow/mcp-cloud/mcp_server.py"
           ],
           "env": {
             "TASKFLOW_VAULT": "/home/kaushi/Documents/Vault/",
@@ -24,7 +24,7 @@
         "taskflow": {
           "command": "python3",
           "args": [
-            "/home/kaushi/Projects/TaskFlow/sidecar/mcp_server.py"
+            "/home/kaushi/Projects/TaskFlow/mcp-cloud/mcp_server.py"
           ]
         }
       }
@@ -35,7 +35,7 @@
         "taskflow": {
           "command": "python",
           "args": [
-            "C:\\Users\\Username\\Projects\\TaskFlow\\sidecar\\mcp_server.py"
+            "C:\\Users\\Username\\Projects\\TaskFlow\\mcp-cloud\\mcp_server.py"
           ]
         }
       }

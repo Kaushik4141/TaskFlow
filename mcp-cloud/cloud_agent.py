@@ -37,7 +37,7 @@ def find_credentials() -> tuple[Optional[str], Optional[str]]:
     if not url or not key:
         search_paths = [
             Path(".env"),
-            Path("sidecar/.env"),
+            Path("mcp-cloud/.env"),
             Path(__file__).parent / ".env",
             Path(__file__).parent.parent / ".env",
         ]
