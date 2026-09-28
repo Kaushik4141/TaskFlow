@@ -35,16 +35,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [
-      "../sidecar/main.py",
-      "../sidecar/basic_summarizer.py",
-      "../sidecar/context_builder.py",
-      "../sidecar/models.py",
-      "../sidecar/embedder.py",
-      "../sidecar/filter.py",
-      "../sidecar/llm_summarizer.py",
-      "../sidecar/summarizer.py",
-      "../sidecar/requirements.txt"
-    ]
+    "resources": []
   }
 }
