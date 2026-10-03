@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter};
 use crate::{capture::types::ContentType, database, AppState, CaptureFailure, WorkflowMode};
 
 use super::{
+    admission::{DeepCaptureAdmission, DeepCapturePermit, TtlCache},
     chunker::chunk_content,
     cleaner::{clean_captured_content, is_meaningful_content},
     types::CapturedContent,
@@ -37,11 +38,27 @@ struct WindowSnapshot {
     pid: i32,
 }
 
-#[derive(Default)]
 struct WindowCache {
-    last_content_hash: HashMap<String, u64>,
-    last_captured_at: HashMap<String, Instant>,
+    content: TtlCache<String, ContentCacheEntry>,
 }
+
+#[derive(Clone, Copy)]
+struct ContentCacheEntry {
+    hash: u64,
+    captured_at: Instant,
+}
+
+impl WindowCache {
+    fn new() -> Self {
+        Self { content: TtlCache::new(256, Duration::from_secs(60 * 60)) }
+    }
+}
+
+const DEEP_CACHE_CAPACITY: usize = 256;
+const DEEP_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
+const MIN_CAPTURE_COOLDOWN: Duration = Duration::from_secs(2);
+const FAILURE_CACHE_CAPACITY: usize = 256;
+const FAILURE_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,8 +75,11 @@ pub struct WindowChangedPayload {
 pub fn start(app: AppHandle, state: AppState) {
     thread::spawn(move || {
         let mut last_window: Option<WindowSnapshot> = None;
-        let mut last_deep_read: HashMap<String, Instant> = HashMap::new();
-        let content_cache = Arc::new(Mutex::new(WindowCache::default()));
+        let mut last_deep_read = TtlCache::new(DEEP_CACHE_CAPACITY, DEEP_CACHE_TTL);
+        let mut pending_deep: Option<(String, WindowSnapshot)> = None;
+        static ADMISSION: std::sync::OnceLock<DeepCaptureAdmission> = std::sync::OnceLock::new();
+        let admission = ADMISSION.get_or_init(DeepCaptureAdmission::default).clone();
+        let content_cache = Arc::new(Mutex::new(WindowCache::new()));
         let own_process_name = std::env::current_exe()
             .ok()
             .and_then(|path| {
@@ -69,6 +89,14 @@ pub fn start(app: AppHandle, state: AppState) {
             .unwrap_or_default();
 
         loop {
+            if state.capture_paused.load(std::sync::atomic::Ordering::Acquire)
+                || (active_task_id(&state).is_none() && !workflow_captures_without_task(&state))
+            {
+                thread::sleep(Duration::from_millis(750));
+                continue;
+            }
+
+            let generation = state.capture_generation.load(std::sync::atomic::Ordering::Acquire);
             if let Some(snapshot) = active_window() {
                 let app_lower = snapshot.app_name.to_lowercase();
                 if !own_process_name.is_empty() && app_lower.contains(&own_process_name) {
@@ -152,7 +180,11 @@ pub fn start(app: AppHandle, state: AppState) {
                 let mut stored_event_id = None;
                 if changed && capture_window_titles {
                     stored_event_id =
-                        emit_and_store_title_only(&app, &state, &snapshot, task_id.clone());
+                        emit_and_store_title_only(&app, &state, &snapshot, task_id.clone(), generation);
+                }
+
+                if changed {
+                    pending_deep = Some((window_key.clone(), snapshot.clone()));
                 }
 
                 let is_sensitive_window = state
@@ -173,28 +205,28 @@ pub fn start(app: AppHandle, state: AppState) {
                     );
                 } else if capture_screen_text
                     && task_id.is_some()
-                    && should_deep_capture(&window_key, changed, &last_deep_read)
+                    && (pending_deep
+                        .as_ref()
+                        .is_some_and(|(key, _)| key == &window_key)
+                        || !changed)
+                    && should_deep_capture(&window_key, pending_deep.is_some(), &mut last_deep_read)
                     && !in_capture_backoff(&state, &snapshot.app_name)
-                    && (changed || user_idle_for(Duration::from_secs(5)))
+                    && (pending_deep.is_some() || user_idle_for(Duration::from_secs(5)))
                 {
-                    last_deep_read.insert(window_key, Instant::now());
-                    eprintln!(
-                        "[taskflow:capture] Attempting deep capture for: {} - {}",
-                        snapshot.app_name, snapshot.window_title
-                    );
-                    log::debug!(
-                        "Attempting deep capture for: {} - {}",
-                        snapshot.app_name,
-                        snapshot.window_title
-                    );
-                    spawn_deep_capture(
-                        app.clone(),
-                        state.clone(),
-                        snapshot.clone(),
-                        task_id.unwrap(),
-                        stored_event_id,
-                        content_cache.clone(),
-                    );
+                    if let Some(permit) = admission.try_acquire() {
+                        last_deep_read.insert(window_key.clone(), Instant::now());
+                        pending_deep = None;
+                        spawn_deep_capture(
+                            app.clone(),
+                            state.clone(),
+                            snapshot.clone(),
+                            task_id.unwrap(),
+                            generation,
+                            stored_event_id,
+                            content_cache.clone(),
+                            permit,
+                        );
+                    }
                 }
 
                 if changed {
@@ -212,7 +244,12 @@ fn emit_and_store_title_only(
     state: &AppState,
     snapshot: &WindowSnapshot,
     task_id: Option<String>,
+    generation: u64,
 ) -> Option<String> {
+    let task_id = task_id?;
+    if !capture_is_current(state, &task_id, generation) {
+        return None;
+    }
     let extracted = url_extractor::extract_from_title(&snapshot.app_name, &snapshot.window_title);
     let url = extracted.and_then(|value| value.likely_url);
     let payload = WindowChangedPayload {
@@ -222,12 +259,14 @@ fn emit_and_store_title_only(
         content_preview: None,
         content_type: ContentType::WindowTitleOnly.as_str().to_string(),
         timestamp: Utc::now().to_rfc3339(),
-        task_id: task_id.clone(),
+        task_id: Some(task_id.clone()),
     };
 
     let _ = app.emit("window-changed", payload);
 
-    let task_id = task_id?;
+    if !capture_is_current(state, &task_id, generation) {
+        return None;
+    }
     let db = state.db.clone();
     let app_name = snapshot.app_name.clone();
     let window_title = snapshot.window_title.clone();
@@ -261,10 +300,16 @@ fn spawn_deep_capture(
     state: AppState,
     snapshot: WindowSnapshot,
     task_id: String,
+    generation: u64,
     title_event_id: Option<String>,
     content_cache: Arc<Mutex<WindowCache>>,
+    permit: DeepCapturePermit,
 ) {
     tauri::async_runtime::spawn_blocking(move || {
+        if !capture_is_current(&state, &task_id, generation) {
+            drop(permit);
+            return;
+        }
         let captured = read_deep_content(&state, &snapshot, task_id);
         if captured.is_none() {
             record_capture_failure(&state, &snapshot.app_name);
@@ -282,6 +327,11 @@ fn spawn_deep_capture(
         record_capture_success(&state, &snapshot.app_name);
 
         let mut captured = captured.unwrap();
+        if !capture_is_current(&state, &captured.task_id, generation) {
+            drop(permit);
+            return;
+        }
+
         if captured.url.is_none() {
             captured.url =
                 url_extractor::extract_from_title(&captured.app_name, &captured.window_title)
@@ -310,11 +360,20 @@ fn spawn_deep_capture(
             timestamp: captured.timestamp.clone(),
             task_id: Some(captured.task_id.clone()),
         };
+        if !capture_is_current(&state, &captured.task_id, generation) {
+            drop(permit);
+            return;
+        }
         let _ = app.emit("window-changed", payload);
 
         let db = state.db.clone();
         tauri::async_runtime::spawn(async move {
-            let window_key = format!("{}:{}", captured.app_name, captured.window_title);
+            // Keep the permit alive until every update/chunk insert completes.
+            let _permit = permit;
+            if !capture_is_current(&state, &captured.task_id, generation) {
+                return;
+            }
+            let window_key = format!("{}|{}|{}:{}", generation, captured.task_id, captured.app_name, captured.window_title);
             if let Some(content) = captured.text.as_deref() {
                 let new_hash = content_hash(content);
                 let mut cache = match content_cache.lock() {
@@ -323,9 +382,9 @@ fn spawn_deep_capture(
                 };
 
                 if cache
-                    .last_content_hash
-                    .get(&window_key)
-                    .is_some_and(|last_hash| *last_hash == new_hash)
+                    .content
+                    .get_cloned(&window_key)
+                    .is_some_and(|entry| entry.hash == new_hash)
                 {
                     eprintln!(
                         "[taskflow:capture] duplicate content skipped for {}",
@@ -335,9 +394,9 @@ fn spawn_deep_capture(
                 }
 
                 if cache
-                    .last_captured_at
-                    .get(&window_key)
-                    .is_some_and(|last_time| last_time.elapsed() < Duration::from_secs(30))
+                    .content
+                    .get_cloned(&window_key)
+                    .is_some_and(|entry| entry.captured_at.elapsed() < Duration::from_secs(30))
                 {
                     eprintln!(
                         "[taskflow:capture] recent duplicate skipped for {}",
@@ -346,10 +405,10 @@ fn spawn_deep_capture(
                     return;
                 }
 
-                cache.last_content_hash.insert(window_key.clone(), new_hash);
-                cache
-                    .last_captured_at
-                    .insert(window_key.clone(), Instant::now());
+                cache.content.insert(
+                    window_key.clone(),
+                    ContentCacheEntry { hash: new_hash, captured_at: Instant::now() },
+                );
             }
 
             let chunks = captured
@@ -368,6 +427,9 @@ fn spawn_deep_capture(
                 captured.url,
                 captured.capture_method
             );
+            if !capture_is_current(&state, &captured.task_id, generation) {
+                return;
+            }
             if let Some(event_id) = title_event_id {
                 let first_chunk = chunks.first().map(|chunk| chunk.text.clone());
                 let content_to_save = first_chunk.or_else(|| captured.text.clone());
@@ -394,6 +456,9 @@ fn spawn_deep_capture(
                 .await;
 
                 if chunks.len() > 1 {
+                    if !capture_is_current(&state, &captured.task_id, generation) {
+                        return;
+                    }
                     let remaining = chunks.into_iter().skip(1).collect::<Vec<_>>();
                     let _ =
                         database::events::insert_captured_chunks(&db, captured, remaining).await;
@@ -486,13 +551,15 @@ fn read_deep_content(
 fn should_deep_capture(
     window_key: &str,
     changed: bool,
-    last_deep_read: &HashMap<String, Instant>,
+    last_deep_read: &mut TtlCache<String, Instant>,
 ) -> bool {
-    changed
-        || last_deep_read
-            .get(window_key)
-            .map(|instant| instant.elapsed() >= Duration::from_secs(90))
-            .unwrap_or(true)
+    last_deep_read
+        .get_cloned(&window_key.to_string())
+        .map(|instant| {
+            instant.elapsed()
+                >= if changed { MIN_CAPTURE_COOLDOWN } else { Duration::from_secs(90) }
+        })
+        .unwrap_or(true)
 }
 
 /// How long to wait before retrying deep capture on an app that has failed
@@ -521,7 +588,8 @@ fn in_capture_backoff(state: &AppState, app_name: &str) -> bool {
     state
         .capture_failures
         .lock()
-        .map(|failures| {
+        .map(|mut failures| {
+            prune_failures(&mut failures);
             failures
                 .get(&app_name.to_lowercase())
                 .is_some_and(|failure| {
@@ -534,8 +602,15 @@ fn in_capture_backoff(state: &AppState, app_name: &str) -> bool {
 /// Record a failed deep capture, extending this app's backoff window.
 fn record_capture_failure(state: &AppState, app_name: &str) {
     if let Ok(mut failures) = state.capture_failures.lock() {
+        prune_failures(&mut failures);
+        let app_key = app_name.to_lowercase();
+        if !failures.contains_key(&app_key) && failures.len() >= FAILURE_CACHE_CAPACITY {
+            let oldest = failures.iter().min_by_key(|(_, failure)| failure.last_attempt)
+                .map(|(key, _)| key.clone());
+            if let Some(oldest) = oldest { failures.remove(&oldest); }
+        }
         let entry = failures
-            .entry(app_name.to_lowercase())
+            .entry(app_key)
             .or_insert(CaptureFailure {
                 consecutive: 0,
                 last_attempt: Instant::now(),
@@ -553,6 +628,9 @@ fn record_capture_success(state: &AppState, app_name: &str) {
 }
 
 fn active_task_id(state: &AppState) -> Option<String> {
+    if state.capture_paused.load(std::sync::atomic::Ordering::Acquire) {
+        return None;
+    }
     state
         .active_task_id
         .lock()
@@ -560,7 +638,11 @@ fn active_task_id(state: &AppState) -> Option<String> {
         .and_then(|guard| guard.clone())
 }
 
-fn ensure_daily_capture_task(state: &AppState) -> Option<String> {
+pub(super) fn ensure_daily_capture_task(state: &AppState) -> Option<String> {
+    let generation = state.capture_generation.load(std::sync::atomic::Ordering::Acquire);
+    if state.capture_paused.load(std::sync::atomic::Ordering::Acquire) {
+        return None;
+    }
     let workflow_mode = state.workflow_mode.read().ok()?.clone();
     if !workflow_mode.captures_without_manual_task() {
         return None;
@@ -571,10 +653,29 @@ fn ensure_daily_capture_task(state: &AppState) -> Option<String> {
         database::tasks::get_or_create_daily_capture_task(&db).await
     })
     .ok()?;
-    if let Ok(mut active_task_id) = state.active_task_id.lock() {
-        *active_task_id = Some(task.id.clone());
+    let mut active_task_id = state.active_task_id.lock().ok()?;
+    if state.capture_paused.load(std::sync::atomic::Ordering::Acquire)
+        || state.capture_generation.load(std::sync::atomic::Ordering::Acquire) != generation
+        || !workflow_captures_without_task(state)
+    {
+        return None;
     }
-    Some(task.id)
+    // An explicit start may have raced the daily lookup. Never replace it.
+    Some(active_task_id.get_or_insert(task.id).clone())
+}
+
+fn prune_failures(failures: &mut HashMap<String, CaptureFailure>) {
+    failures.retain(|_, failure| failure.last_attempt.elapsed() < FAILURE_CACHE_TTL);
+}
+
+pub(super) fn workflow_captures_without_task(state: &AppState) -> bool {
+    state.workflow_mode.read().map(|mode| mode.captures_without_manual_task()).unwrap_or(false)
+}
+
+pub(super) fn capture_is_current(state: &AppState, task_id: &str, generation: u64) -> bool {
+    !state.capture_paused.load(std::sync::atomic::Ordering::Acquire)
+        && state.capture_generation.load(std::sync::atomic::Ordering::Acquire) == generation
+        && state.active_task_id.lock().map(|active| active.as_deref() == Some(task_id)).unwrap_or(false)
 }
 
 fn workflow_allows_app(state: &AppState, app_name: &str) -> bool {

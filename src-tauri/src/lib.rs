@@ -11,7 +11,7 @@ mod rollup;
 pub mod wiki;
 
 use std::sync::{
-    atomic::AtomicBool,
+    atomic::{AtomicBool, AtomicU64},
     Arc, Mutex, RwLock,
 };
 
@@ -26,6 +26,11 @@ pub struct AppState {
     pub active_task_id: Arc<Mutex<Option<String>>>,
     pub ai_client: Arc<AiClient>,
     pub sidecar_ready: Arc<AtomicBool>,
+    /// Set by task/workflow commands while capture is paused.  Capture loops
+    /// also check this immediately before emitting/persisting results so a
+    /// stop invalidates work already in progress.
+    pub capture_paused: Arc<AtomicBool>,
+    pub capture_generation: Arc<AtomicU64>,
     pub privacy_filter: Arc<RwLock<PrivacyFilter>>,
     pub capture_settings: Arc<RwLock<CaptureSettings>>,
     pub workflow_mode: Arc<RwLock<WorkflowMode>>,
@@ -112,6 +117,8 @@ pub fn run() {
                 active_task_id: Arc::new(Mutex::new(active_task_id)),
                 ai_client: Arc::new(AiClient::new()),
                 sidecar_ready: Arc::new(AtomicBool::new(true)),
+                capture_paused: Arc::new(AtomicBool::new(false)),
+                capture_generation: Arc::new(AtomicU64::new(0)),
                 privacy_filter: Arc::new(RwLock::new(privacy_filter)),
                 capture_settings: Arc::new(RwLock::new(capture_settings)),
                 workflow_mode: Arc::new(RwLock::new(workflow_mode)),
@@ -234,4 +241,3 @@ async fn load_capture_configuration(
         selective_capture_apps,
     ))
 }
-

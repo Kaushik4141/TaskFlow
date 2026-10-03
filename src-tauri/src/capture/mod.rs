@@ -1,6 +1,7 @@
 pub mod chunker;
 pub mod cleaner;
 pub mod clipboard;
+pub(crate) mod admission;
 pub mod privacy;
 pub mod types;
 pub mod url_extractor;

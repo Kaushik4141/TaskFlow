@@ -1,9 +1,9 @@
 #![cfg(target_os = "linux")]
 
 use std::{
-    io::{self, Read},
-    process::{Command, Stdio},
-    sync::Arc,
+    process::Command,
+    sync::{Arc, Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use chrono::Utc;
@@ -13,6 +13,385 @@ use super::{
     privacy::PrivacyFilter,
     types::{CapturedContent, ContentType},
 };
+
+/// Process execution is deliberately kept here rather than relying on an
+/// unbounded `wait_with_output()`: it gives capture a deadline and output cap.
+/// The helper also puts children
+/// in their own process group so a shell fixture (or a screenshot helper that
+/// forks) cannot survive the parent being killed.
+mod bounded_process {
+    use std::{
+        io::{self, Read, Write},
+        os::fd::AsRawFd,
+        process::{Child, Command, ExitStatus, Stdio},
+        sync::{atomic::{AtomicBool, Ordering}, Arc},
+        thread,
+        time::{Duration, Instant},
+    };
+
+    #[derive(Clone, Copy)]
+    pub(super) struct Limits {
+        pub timeout: Duration,
+        pub stdout_bytes: usize,
+        pub stderr_bytes: usize,
+    }
+
+    impl Limits {
+        pub(super) const fn new(
+            timeout: Duration,
+            stdout_bytes: usize,
+            stderr_bytes: usize,
+        ) -> Self {
+            Self { timeout, stdout_bytes, stderr_bytes }
+        }
+    }
+
+    pub(super) struct Output {
+        pub status: ExitStatus,
+        pub stdout: Vec<u8>,
+        pub stderr: Vec<u8>,
+        pub timed_out: bool,
+        pub output_limited: bool,
+    }
+
+    struct DrainResult {
+        bytes: Vec<u8>,
+        limited: bool,
+        errored: bool,
+    }
+
+    // Linux-only file: these are the small POSIX calls needed to terminate a
+    // process group without adding a libc dependency to the desktop app.
+    unsafe extern "C" {
+        fn setpgid(pid: i32, pgid: i32) -> i32;
+        fn kill(pid: i32, signal: i32) -> i32;
+        fn fcntl(fd: i32, command: i32, ...) -> i32;
+    }
+
+    fn make_process_group(command: &mut Command) {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: this closure runs in the child between fork and exec and
+        // only calls the async-signal-safe setpgid syscall.
+        unsafe {
+            command.pre_exec(|| {
+                if setpgid(0, 0) == 0 {
+                    Ok(())
+                } else {
+                    Err(io::Error::last_os_error())
+                }
+            });
+        }
+    }
+
+    fn kill_and_reap(child: &mut Child) -> io::Result<ExitStatus> {
+        let pid = child.id() as i32;
+        // SAFETY: pid is the live child process id returned by std::process.
+        // A negative pid targets only the process group created above.
+        unsafe {
+            let _ = kill(-pid, 9);
+        }
+        // Keep this fallback for a process that exited before setpgid/kill,
+        // and for platforms whose kernel rejects the group signal.
+        let _ = child.kill();
+        child.wait()
+    }
+
+    fn nonblocking(pipe: &impl AsRawFd) -> io::Result<()> {
+        // Linux F_GETFL=3, F_SETFL=4, O_NONBLOCK=0x800. We own these
+        // descriptors; no other code depends on their blocking mode.
+        unsafe {
+            let flags = fcntl(pipe.as_raw_fd(), 3);
+            if flags < 0 || fcntl(pipe.as_raw_fd(), 4, flags | 0x800) < 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn drain<R: Read>(
+        mut reader: R,
+        cap: usize,
+        signal: Arc<AtomicBool>,
+        stop: Arc<AtomicBool>,
+        deadline: Instant,
+    ) -> DrainResult {
+        let mut bytes = Vec::with_capacity(cap.min(8192));
+        let mut buffer = [0_u8; 8192];
+        let mut limited = false;
+        let mut errored = false;
+        loop {
+            if stop.load(Ordering::Acquire) || Instant::now() >= deadline {
+                break;
+            }
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => {
+                    let room = cap.saturating_sub(bytes.len());
+                    if count > room {
+                        limited = true;
+                        signal.store(true, Ordering::Release);
+                        bytes.extend_from_slice(&buffer[..room]);
+                        break;
+                    }
+                    bytes.extend_from_slice(&buffer[..count.min(room)]);
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => {
+                    errored = true;
+                    signal.store(true, Ordering::Release);
+                    break;
+                }
+            }
+        }
+        DrainResult { bytes, limited, errored }
+    }
+
+    /// Run a command with bounded output and a hard deadline. On every error,
+    /// timeout, and output overflow path the child is killed and reaped before
+    /// this function returns. Reader threads are joined on every path too.
+    pub(super) fn run(
+        mut command: Command,
+        input: Option<Vec<u8>>,
+        limits: Limits,
+    ) -> io::Result<Output> {
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        if input.is_some() {
+            command.stdin(Stdio::piped());
+        } else {
+            command.stdin(Stdio::null());
+        }
+        make_process_group(&mut command);
+        let deadline = Instant::now() + limits.timeout;
+        let mut child = command.spawn()?;
+
+        let stdout = match child.stdout.take() {
+            Some(pipe) => pipe,
+            None => {
+                let _ = kill_and_reap(&mut child);
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "stdout was not piped"));
+            }
+        };
+        let stderr = match child.stderr.take() {
+            Some(pipe) => pipe,
+            None => {
+                let _ = kill_and_reap(&mut child);
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "stderr was not piped"));
+            }
+        };
+        if let Err(error) = nonblocking(&stdout)
+            .and_then(|_| nonblocking(&stderr))
+            .and_then(|_| child.stdin.as_ref().map_or(Ok(()), nonblocking))
+        {
+            let _ = kill_and_reap(&mut child);
+            return Err(error);
+        }
+
+        let output_limited = Arc::new(AtomicBool::new(false));
+        let reader_error = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let stdout_signal = Arc::clone(&output_limited);
+        let stdout_error = Arc::clone(&reader_error);
+        let stdout_stop = Arc::clone(&stop);
+        let stdout_thread = thread::spawn(move || {
+            let result = drain(stdout, limits.stdout_bytes, stdout_signal, stdout_stop, deadline);
+            if result.errored {
+                stdout_error.store(true, Ordering::Release);
+            }
+            result
+        });
+        let stderr_signal = Arc::clone(&output_limited);
+        let stderr_error = Arc::clone(&reader_error);
+        let stderr_stop = Arc::clone(&stop);
+        let stderr_thread = thread::spawn(move || {
+            let result = drain(stderr, limits.stderr_bytes, stderr_signal, stderr_stop, deadline);
+            if result.errored {
+                stderr_error.store(true, Ordering::Release);
+            }
+            result
+        });
+
+        let stdin_error = Arc::new(AtomicBool::new(false));
+        let stdin_thread = if let Some(input) = input {
+            let pipe = match child.stdin.take() {
+                Some(pipe) => pipe,
+                None => {
+                    let _ = kill_and_reap(&mut child);
+                    let _ = stdout_thread.join();
+                    let _ = stderr_thread.join();
+                    return Err(io::Error::new(io::ErrorKind::BrokenPipe, "stdin was not piped"));
+                }
+            };
+            let error = Arc::clone(&stdin_error);
+            let writer_stop = Arc::clone(&stop);
+            Some(thread::spawn(move || {
+                let mut pipe = pipe;
+                let mut written = 0;
+                while written < input.len()
+                    && !writer_stop.load(Ordering::Acquire)
+                    && Instant::now() < deadline
+                {
+                    match pipe.write(&input[written..(written + 8192).min(input.len())]) {
+                        Ok(0) => {
+                            error.store(true, Ordering::Release);
+                            break;
+                        }
+                        Ok(count) => written += count,
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(2));
+                        }
+                        Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(_) => {
+                            error.store(true, Ordering::Release);
+                            break;
+                        }
+                    }
+                }
+                // Closing stdin is required for tesseract to finish reading.
+            }))
+        } else {
+            None
+        };
+
+        let mut timed_out = false;
+        let mut status = None;
+        loop {
+            match child.try_wait() {
+                Ok(Some(exit)) => {
+                    status = Some(exit);
+                    // A parent can exit while a descendant retains either
+                    // pipe. Kill the whole group before joining readers; this
+                    // prevents a hidden `sleep`/shell child from making the
+                    // join unbounded.
+                    status = kill_and_reap(&mut child).ok().or(status);
+                    break;
+                }
+                Ok(None) => {
+                    if output_limited.load(Ordering::Acquire)
+                        || reader_error.load(Ordering::Acquire)
+                        || stdin_error.load(Ordering::Acquire)
+                    {
+                        break;
+                    }
+                    if Instant::now() >= deadline {
+                        timed_out = true;
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(_) => break,
+            }
+        }
+
+        if status.is_none() {
+            // This is also used for pipe/read/try_wait errors. In all cases,
+            // reap first, then join the drainers below.
+            status = kill_and_reap(&mut child).ok();
+            stop.store(true, Ordering::Release);
+        }
+        // Nonblocking pipe loops have their own deadline, so even a descendant
+        // that escapes the process group and retains a pipe cannot hang joins.
+        // Join *all* workers before propagating any worker panic.
+        let stdout_join = stdout_thread.join();
+        let stderr_join = stderr_thread.join();
+        let stdin_join = stdin_thread.map(|thread| thread.join()).transpose();
+        let stdout_result = stdout_join.map_err(|_| io::Error::other("stdout reader panicked"))?;
+        let stderr_result = stderr_join.map_err(|_| io::Error::other("stderr reader panicked"))?;
+        stdin_join.map_err(|_| io::Error::other("stdin writer panicked"))?;
+        timed_out |= Instant::now() >= deadline;
+        let status = status.ok_or_else(|| io::Error::other("could not reap child"))?;
+        if stdout_result.errored || stderr_result.errored || stdin_error.load(Ordering::Acquire) {
+            return Err(io::Error::other("child pipe I/O failed"));
+        }
+        Ok(Output {
+            status,
+            stdout: stdout_result.bytes,
+            stderr: stderr_result.bytes,
+            timed_out,
+            output_limited: output_limited.load(Ordering::Acquire)
+                || stdout_result.limited
+                || stderr_result.limited,
+        })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::process::Command;
+
+        fn limits(timeout: Duration, output: usize) -> Limits {
+            Limits::new(timeout, output, output)
+        }
+
+        #[test]
+        fn harmless_child_succeeds_and_drains_both_pipes() {
+            let output = run(
+                {
+                    let mut command = Command::new("sh");
+                    command.args(["-c", "printf success; printf warning >&2"]);
+                    command
+                },
+                None,
+                limits(Duration::from_secs(2), 1024),
+            )
+            .expect("child should succeed");
+            assert!(output.status.success());
+            assert_eq!(output.stdout, b"success");
+            assert_eq!(output.stderr, b"warning");
+        }
+
+        #[test]
+        fn output_limit_kills_and_reaps_child() {
+            let output = run(
+                {
+                    let mut command = Command::new("sh");
+                    command.args(["-c", "yes x"]);
+                    command
+                },
+                None,
+                limits(Duration::from_secs(2), 4096),
+            )
+            .expect("limited child should be reaped");
+            assert!(output.output_limited);
+            assert!(output.stdout.len() <= 4096);
+        }
+
+        #[test]
+        fn timeout_kills_process_group_and_reaps_fixture() {
+            let started = Instant::now();
+            let output = run(
+                {
+                    let mut command = Command::new("sh");
+                    command.args(["-c", "sleep 30"]);
+                    command
+                },
+                None,
+                limits(Duration::from_millis(50), 1024),
+            )
+            .expect("timed out child should be reaped");
+            assert!(output.timed_out);
+            assert!(started.elapsed() < Duration::from_secs(3));
+        }
+
+        #[test]
+        fn input_is_closed_after_successful_write() {
+            let output = run(
+                {
+                    let mut command = Command::new("sh");
+                    command.args(["-c", "cat"]);
+                    command
+                },
+                Some(b"in-memory".to_vec()),
+                limits(Duration::from_secs(2), 1024),
+            )
+            .expect("stdin fixture should finish");
+            assert_eq!(output.stdout, b"in-memory");
+        }
+    }
+}
 
 pub struct LinuxWindow {
     pub app_name: String,
@@ -25,6 +404,12 @@ pub struct LinuxReader {
     privacy: Arc<PrivacyFilter>,
     ocr_enabled: bool,
 }
+
+const MAX_IMAGE_EDGE: i64 = 1920;
+const MAX_SCREENSHOT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_OCR_IMAGE_BYTES: usize = 12 * 1024 * 1024;
+const MAX_TEXT_BYTES: usize = 256 * 1024;
+const PROCESS_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl LinuxReader {
     pub fn new(privacy: Arc<PrivacyFilter>) -> Self {
@@ -88,11 +473,15 @@ impl LinuxReader {
     }
 
     fn ocr_hyprland_window(&self, pid: i32, window_title: &str) -> Option<String> {
-        let output = Command::new("hyprctl")
-            .args(["clients", "-j"])
-            .output()
-            .ok()?;
-        if !output.status.success() {
+        let mut command = Command::new("hyprctl");
+        command.args(["clients", "-j"]);
+        let output = bounded_process::run(
+            command,
+            None,
+            bounded_process::Limits::new(PROCESS_TIMEOUT, 2 * 1024 * 1024, 64 * 1024),
+        )
+        .ok()?;
+        if !output.status.success() || output.timed_out || output.output_limited {
             return None;
         }
 
@@ -104,134 +493,173 @@ impl LinuxReader {
         let (x, y, width, height) = parse_hyprland_geometry(&window)?;
 
         let geometry = format!("{x},{y} {width}x{height}");
-        self.ocr_command(
-            Command::new("grim")
-                .arg("-g")
-                .arg(geometry)
-                .args(["-l", "1"])
-                .arg("-")
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn(),
-        )
+        let scale = if width.max(height) > MAX_IMAGE_EDGE {
+            (MAX_IMAGE_EDGE - 1) as f64 / width.max(height) as f64
+        } else {
+            1.0
+        };
+        let mut command = Command::new("grim");
+        command
+            .args(["-g", &geometry, "-s", &format!("{scale:.8}"), "-l", "1", "-"]);
+        let image = capture_image(command)?;
+        self.ocr_image(image)
     }
 
     fn ocr_x11_window(&self, window_id: isize) -> Option<String> {
-        let import = Command::new("import")
-            .arg("-window")
-            .arg(window_id.to_string())
-            .arg("png:-")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-        if import.is_ok() {
-            return self.ocr_command(import);
-        }
-
-        let maim = Command::new("maim")
-            .arg("-i")
-            .arg(window_id.to_string())
-            .stdout(Stdio::piped())
-            .spawn();
-        self.ocr_command(maim)
+        let id = window_id.to_string();
+        let mut import = Command::new("import");
+        // No maim fallback: it cannot bound dimensions before emitting the
+        // native-size image. Disable ImageMagick's disk pixel cache and limit
+        // its resources; reduction and PNG encoding occur entirely in RAM.
+        import.args([
+            "-limit", "memory", "64MiB",
+            "-limit", "map", "0",
+            "-limit", "disk", "0",
+            "-limit", "thread", "1",
+            "-limit", "width", "16384",
+            "-limit", "height", "16384",
+            "-window", &id,
+            "-resize", "1920x1920>", "png:-",
+        ]);
+        let image = capture_image(import)?;
+        self.ocr_image(image)
     }
 
-    fn ocr_command(&self, screenshot: std::io::Result<std::process::Child>) -> Option<String> {
-        let mut screenshot = screenshot.ok()?;
-        let mut image = screenshot.stdout.take()?;
-
-        let mut tesseract = Command::new("tesseract")
-            .env("OMP_THREAD_LIMIT", "2")
-            .arg("stdin")
-            .arg("stdout")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .ok()?;
-        let mut tesseract_stdin = tesseract.stdin.take()?;
-        let copy_result = io::copy(&mut image, &mut tesseract_stdin);
-        drop(tesseract_stdin);
-
-        let screenshot_result = screenshot.wait();
-        let mut screenshot_stderr = screenshot.stderr.take();
-        let screenshot_error = screenshot_stderr
-            .as_mut()
-            .map(|stderr| {
-                let mut message = String::new();
-                let _ = stderr.read_to_string(&mut message);
-                message.trim().to_string()
-            })
-            .unwrap_or_default();
-        let output = tesseract.wait_with_output().ok()?;
-        if let Err(error) = &copy_result {
-            eprintln!("[taskflow:capture] OCR image pipe failed: {error}");
+    fn ocr_image(&self, image: Vec<u8>) -> Option<String> {
+        if image.is_empty() || image.len() > MAX_OCR_IMAGE_BYTES || !bounded_png_dimensions(&image) {
             return None;
         }
-        if let Err(error) = &screenshot_result {
-            eprintln!("[taskflow:capture] screenshot process failed: {error}");
+        let mut tesseract = Command::new("tesseract");
+        tesseract
+            .env("OMP_THREAD_LIMIT", "1")
+            .env("OMP_NUM_THREADS", "1")
+            .args(["stdin", "stdout"]);
+        let output = bounded_process::run(
+            tesseract,
+            Some(image),
+            bounded_process::Limits::new(Duration::from_secs(15), MAX_TEXT_BYTES, 64 * 1024),
+        )
+        .ok()?;
+        if !output.status.success() || output.timed_out || output.output_limited {
             return None;
         }
-        if !screenshot_result.is_ok_and(|status| status.success()) {
-            eprintln!("[taskflow:capture] screenshot failed: {screenshot_error}");
-            return None;
-        }
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            eprintln!("[taskflow:capture] tesseract failed: {error}");
-            return None;
-        }
-        if !output.status.success() {
-            return None;
-        }
-
         let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
         (!text.is_empty()).then_some(text)
     }
 }
 
+fn capture_image(command: Command) -> Option<Vec<u8>> {
+    let output = bounded_process::run(
+        command,
+        None,
+        bounded_process::Limits::new(Duration::from_secs(8), MAX_SCREENSHOT_BYTES, 64 * 1024),
+    )
+    .ok()?;
+    if !output.status.success() || output.timed_out || output.output_limited || output.stdout.is_empty() {
+        return None;
+    }
+    Some(output.stdout)
+}
+
+fn bounded_png_dimensions(image: &[u8]) -> bool {
+    // All capture commands emit PNG. A tiny compressed image can describe
+    // enormous dimensions, so a byte cap alone is not enough for OCR.
+    if image.len() < 33
+        || &image[..8] != b"\x89PNG\r\n\x1a\n"
+        || image[8..12] != 13_u32.to_be_bytes()
+        || &image[12..16] != b"IHDR"
+    {
+        return false;
+    }
+    let width = u32::from_be_bytes(image[16..20].try_into().unwrap());
+    let height = u32::from_be_bytes(image[20..24].try_into().unwrap());
+    width > 0 && height > 0 && i64::from(width.max(height)) <= MAX_IMAGE_EDGE
+}
+
+#[derive(Clone)]
+struct CachedCapability {
+    checked_at: Instant,
+    unavailable: Option<String>,
+}
+
+static OCR_CAPABILITY_CACHE: OnceLock<Mutex<[Option<CachedCapability>; 2]>> = OnceLock::new();
+
 fn linux_ocr_unavailable_reason(platform_handle: isize) -> Option<String> {
-    let languages = Command::new("tesseract")
-        .arg("--list-langs")
-        .output()
-        .ok()?;
-    if !languages.status.success() {
-        let error = String::from_utf8_lossy(&languages.stderr).trim().to_string();
-        return Some(format!("tesseract could not list languages: {error}"));
+    let index = usize::from(platform_handle != 0);
+    let cache = OCR_CAPABILITY_CACHE.get_or_init(|| Mutex::new([None, None]));
+    let now = Instant::now();
+    {
+        let guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(entry) = &guard[index] {
+            let ttl = if entry.unavailable.is_some() {
+                Duration::from_secs(10)
+            } else {
+                Duration::from_secs(60)
+            };
+            if now.duration_since(entry.checked_at) < ttl {
+                return entry.unavailable.clone();
+            }
+        }
     }
 
-    let language_list = String::from_utf8_lossy(&languages.stdout);
-    if !language_list.lines().any(|language| language.trim() == "eng") {
-        return Some(
-            "English OCR data is missing; install tesseract-data-eng".to_string(),
-        );
-    }
+    let reason = check_linux_ocr_capability(platform_handle);
+    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard[index] = Some(CachedCapability { checked_at: now, unavailable: reason.clone() });
+    reason
+}
 
-    let screenshot_tool = if platform_handle == 0 {
-        "grim"
-    } else {
-        "import or maim"
+fn check_linux_ocr_capability(platform_handle: isize) -> Option<String> {
+    let mut languages_command = Command::new("tesseract");
+    languages_command.arg("--list-langs");
+    let languages = match bounded_process::run(
+        languages_command,
+        None,
+        bounded_process::Limits::new(Duration::from_secs(3), 128 * 1024, 32 * 1024),
+    ) {
+        Ok(output) if output.status.success() && !output.timed_out && !output.output_limited => output,
+        Ok(output) => {
+            let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Some(if error.is_empty() {
+                "tesseract could not list languages".to_string()
+            } else {
+                format!("tesseract could not list languages: {error}")
+            });
+        }
+        Err(error) => return Some(format!("tesseract is not installed or unavailable: {error}")),
     };
-    let tool_exists = if platform_handle == 0 {
-        Command::new("grim").arg("-h").output().is_ok_and(|output| {
-            output.status.success()
-        })
-    } else {
-        Command::new("import")
-            .arg("-version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-            || Command::new("maim")
-                .arg("--version")
-                .output()
-                .map(|output| output.status.success())
-                .unwrap_or(false)
-    };
-    if !tool_exists {
-        return Some(format!("{screenshot_tool} is not installed"));
+    if !String::from_utf8_lossy(&languages.stdout)
+        .lines()
+        .any(|language| language.trim() == "eng")
+    {
+        return Some("English OCR data is missing; install tesseract-data-eng".to_string());
     }
 
+    let tool_available = if platform_handle == 0 {
+        let mut command = Command::new("grim");
+        command.arg("-h");
+        bounded_process::run(
+            command,
+            None,
+            bounded_process::Limits::new(Duration::from_secs(2), 32 * 1024, 32 * 1024),
+        )
+        .is_ok_and(|output| !output.timed_out && !output.output_limited)
+    } else {
+        let mut command = Command::new("import");
+        command.arg("-version");
+        bounded_process::run(
+            command,
+            None,
+            bounded_process::Limits::new(Duration::from_secs(2), 32 * 1024, 32 * 1024),
+        )
+        .is_ok_and(|output| output.status.success() && !output.timed_out && !output.output_limited)
+    };
+    if !tool_available {
+        return Some(if platform_handle == 0 {
+            "grim is not installed".to_string()
+        } else {
+            "ImageMagick import is not installed or unavailable (maim-only capture is unsafe)".to_string()
+        });
+    }
     None
 }
 
@@ -240,11 +668,15 @@ fn hyprland_active_window() -> Option<LinuxWindow> {
         return None;
     }
 
-    let output = Command::new("hyprctl")
-        .args(["activewindow", "-j"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
+    let mut command = Command::new("hyprctl");
+    command.args(["activewindow", "-j"]);
+    let output = bounded_process::run(
+        command,
+        None,
+        bounded_process::Limits::new(Duration::from_secs(2), 512 * 1024, 64 * 1024),
+    )
+    .ok()?;
+    if !output.status.success() || output.timed_out || output.output_limited {
         return None;
     }
 
@@ -276,11 +708,15 @@ fn hyprland_active_window() -> Option<LinuxWindow> {
 }
 
 fn x11_active_window() -> Option<LinuxWindow> {
-    let output = Command::new("xprop")
-        .args(["-root", "-notype", "_NET_ACTIVE_WINDOW"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
+    let mut active_command = Command::new("xprop");
+    active_command.args(["-root", "-notype", "_NET_ACTIVE_WINDOW"]);
+    let output = bounded_process::run(
+        active_command,
+        None,
+        bounded_process::Limits::new(Duration::from_secs(2), 64 * 1024, 32 * 1024),
+    )
+    .ok()?;
+    if !output.status.success() || output.timed_out || output.output_limited {
         return None;
     }
 
@@ -293,13 +729,18 @@ fn x11_active_window() -> Option<LinuxWindow> {
             .and_then(|value| parse_number(value))
     })?;
 
-    let output = Command::new("xprop")
+    let mut properties_command = Command::new("xprop");
+    properties_command
         .arg("-id")
         .arg(window_id.to_string())
-        .args(["-notype", "WM_CLASS", "_NET_WM_NAME", "_NET_WM_PID"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
+        .args(["-notype", "WM_CLASS", "_NET_WM_NAME", "_NET_WM_PID"]);
+    let output = bounded_process::run(
+        properties_command,
+        None,
+        bounded_process::Limits::new(Duration::from_secs(2), 64 * 1024, 32 * 1024),
+    )
+    .ok()?;
+    if !output.status.success() || output.timed_out || output.output_limited {
         return None;
     }
 
@@ -343,7 +784,11 @@ fn parse_hyprland_geometry(window: &Value) -> Option<(i64, i64, i64, i64)> {
         .pointer("/size/1")
         .or_else(|| window.pointer("/size/height"))
         .and_then(Value::as_i64)?;
-    if width <= 0 || height <= 0 {
+    if width <= 0 || height <= 0 || width > 16384 || height > 16384
+        || i32::try_from(x).is_err() || i32::try_from(y).is_err()
+        || x.checked_add(width).and_then(|edge| i32::try_from(edge).ok()).is_none()
+        || y.checked_add(height).and_then(|edge| i32::try_from(edge).ok()).is_none()
+    {
         return None;
     }
     Some((x, y, width, height))

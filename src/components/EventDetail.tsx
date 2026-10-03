@@ -20,6 +20,7 @@ import { useTaskStore } from '../stores/taskStore'
 import AppLogo from './AppLogo'
 import { useToastStore } from '../stores/toastStore'
 import { formatActivityTitle, cleanAppName, cleanWindowTitle } from '../lib/activityFormat'
+import { shallow } from 'zustand/shallow'
 
 function ClockSvg({ className = 'h-3.5 w-3.5' }: { className?: string }) {
   return (
@@ -45,7 +46,14 @@ interface EventDetailProps {
 }
 
 export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailProps) {
-  const { rollups, selectedTask, events, setSelectedRollupId } = useTaskStore()
+  const { rollups, events, setSelectedRollupId } = useTaskStore(
+    (state) => ({
+      rollups: state.rollups,
+      events: state.events,
+      setSelectedRollupId: state.setSelectedRollupId,
+    }),
+    shallow,
+  )
   const [copied, setCopied] = useState(false)
   const [exported, setExported] = useState(false)
   const [activeTab, setActiveTab] = useState<'summary' | 'activity'>('summary')

@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { listen, type Event as TauriEvent } from '@tauri-apps/api/event'
 import { create } from 'zustand'
-import type { CaptureStats, Documentation, Event, Integration, MemorySearchResponse, Note, Rollup, SearchResult, Task, TaskStats, TestResult, Ticket } from '../types'
+import type { Documentation, Event, Integration, MemorySearchResponse, Note, Rollup, SearchResult, Task, TaskStats, TestResult, Ticket } from '../types'
 import { useToastStore } from './toastStore'
 
 const toast = (type: 'success' | 'error' | 'info', message: string) => {
@@ -22,7 +22,6 @@ interface TaskStore {
   isSyncingTickets: boolean
   syncProgress: string | null
   settingsOpen: boolean
-  captureStats: CaptureStats | null
   searchOpen: boolean
   taskStats: TaskStats | null
   onboardingCompleted: boolean | null
@@ -62,7 +61,6 @@ interface TaskStore {
   syncTickets: () => Promise<void>
   searchTickets: (query: string, provider?: Integration['provider'] | null) => Promise<void>
   createTaskFromTicket: (ticketId: string, sourceBranch?: string | null) => Promise<void>
-  fetchCaptureStats: (taskId: string) => Promise<void>
   updatePrivacySettings: (settings: {
     excludedApps: string[]
     captureClipboard: boolean
@@ -97,7 +95,6 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   isSyncingTickets: false,
   syncProgress: null,
   settingsOpen: false,
-  captureStats: null,
   searchOpen: false,
   taskStats: null,
   onboardingCompleted: null,
@@ -298,13 +295,6 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     toast('success', `Task created from ticket`)
   },
 
-  fetchCaptureStats: async (taskId) => {
-    const captureStats = await invoke<CaptureStats>('get_capture_stats', { taskId })
-    if (get().selectedTask?.id === taskId) {
-      set({ captureStats })
-    }
-  },
-
   updatePrivacySettings: async (settings) => {
     await invoke('update_privacy_settings', settings)
   },
@@ -386,36 +376,153 @@ let listenersStarted = false
 
 export function startTaskStoreListeners() {
   if (listenersStarted) {
-    return
+    return () => undefined
   }
   listenersStarted = true
 
-  const refreshVisibleEvents = () => {
-    const { activeTask, selectedTask, fetchEvents } = useTaskStore.getState()
+  let disposed = false
+  let refreshTimer: number | null = null
+  let refreshInFlight = false
+  let eventsPending = false
+  let rollupsPending = false
+  const unlistenFns: Array<() => void> = []
+
+  const scheduleVisibleRefresh = () => {
+    if (disposed || document.hidden) {
+      return
+    }
+    if (refreshInFlight) {
+      return
+    }
+    if (refreshTimer !== null) {
+      return
+    }
+
+    // One shared debounce window lets a burst of capture events settle before
+    // reading the persisted event list. It also avoids a timer per event.
+    refreshTimer = window.setTimeout(() => {
+      refreshTimer = null
+      if (disposed || document.hidden) {
+        return
+      }
+
+      const { selectedTask, fetchEvents, fetchRollups } = useTaskStore.getState()
+      if (!selectedTask) {
+        eventsPending = false
+        rollupsPending = false
+        return
+      }
+
+      const taskId = selectedTask.id
+      const refreshEvents = eventsPending
+      const refreshRollups = rollupsPending
+      eventsPending = false
+      rollupsPending = false
+      refreshInFlight = true
+      void (async () => {
+        try {
+          // Keep refreshes strictly sequential: a burst can never create
+          // overlapping backend reads, even when both lists need updating.
+          if (refreshEvents) {
+            try {
+              await fetchEvents(taskId)
+            } catch {
+              // Capture refresh is best effort; the next event can retry it.
+            }
+          }
+          if (refreshRollups) {
+            try {
+              await fetchRollups(taskId)
+            } catch {
+              // Timeline refresh is best effort.
+            }
+          }
+        } finally {
+          refreshInFlight = false
+          if (!disposed && (eventsPending || rollupsPending)) {
+            scheduleVisibleRefresh()
+          }
+        }
+      })()
+    }, 100)
+  }
+
+  const onCaptureChanged = () => {
+    const { activeTask, selectedTask } = useTaskStore.getState()
     if (activeTask && selectedTask?.id === activeTask.id) {
-      window.setTimeout(() => {
-        void fetchEvents(activeTask.id)
-      }, 100)
+      eventsPending = true
+      scheduleVisibleRefresh()
     }
   }
 
-  void listen('window-changed', refreshVisibleEvents)
-  void listen('clipboard-changed', refreshVisibleEvents)
-  void listen<Rollup>('rollup-created', (event) => {
+  const onVisibilityChange = () => {
+    if (document.hidden) {
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer)
+        refreshTimer = null
+      }
+      return
+    }
+    // Catch up once when returning to the app, without polling while hidden.
+    // Refresh the selected task, including paused/history views that may have
+    // received a final rollup while the document was hidden.
+    eventsPending = true
+    rollupsPending = true
+    scheduleVisibleRefresh()
+  }
+
+  const register = <T>(eventName: string, handler: (event: TauriEvent<T>) => void) => {
+    void listen<T>(eventName, handler)
+      .then((unlisten) => {
+        if (disposed) {
+          unlisten()
+        } else {
+          unlistenFns.push(unlisten)
+        }
+      })
+      .catch(() => {
+        // Event listeners are an enhancement; startup must remain resilient.
+      })
+  }
+
+  register('window-changed', onCaptureChanged)
+  register('clipboard-changed', onCaptureChanged)
+  register<Rollup>('rollup-created', (event) => {
     // Silently fold the new roll-up into the visible timeline — no toast:
     // roll-ups fire every few minutes and must never demand attention.
-    const { selectedTask, fetchRollups } = useTaskStore.getState()
+    const { selectedTask } = useTaskStore.getState()
     if (selectedTask && event.payload.taskId === selectedTask.id) {
-      void fetchRollups(selectedTask.id)
+      rollupsPending = true
+      scheduleVisibleRefresh()
     }
   })
-  void listen<boolean>('sidecar-ready', () => {
+  register<boolean>('sidecar-ready', () => {
     useTaskStore.setState({ sidecarReady: true })
   })
-  void listen<string>('ticket-sync-progress', (event) => {
+  register<string>('ticket-sync-progress', (event) => {
     useTaskStore.setState({ syncProgress: event.payload })
   })
-  void useTaskStore.getState().fetchSidecarStatus()
-  void useTaskStore.getState().fetchIntegrations()
-  void useTaskStore.getState().fetchTaskStats()
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  void useTaskStore.getState().fetchSidecarStatus().catch(() => undefined)
+  void useTaskStore.getState().fetchIntegrations().catch(() => undefined)
+  void useTaskStore.getState().fetchTaskStats().catch(() => undefined)
+
+  return () => {
+    if (disposed) {
+      return
+    }
+    disposed = true
+    listenersStarted = false
+    if (refreshTimer !== null) {
+      window.clearTimeout(refreshTimer)
+      refreshTimer = null
+    }
+    eventsPending = false
+    rollupsPending = false
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    for (const unlisten of unlistenFns) {
+      unlisten()
+    }
+    unlistenFns.length = 0
+  }
 }

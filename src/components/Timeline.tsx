@@ -16,6 +16,7 @@ import { selectionSpring, useStaggerContainer, useStaggerItem } from '../lib/mot
 import AppLogo from './AppLogo'
 import TaskFlowLogo from './TaskFlowLogo'
 import { formatActivityTitle, cleanAppName } from '../lib/activityFormat'
+import { shallow } from 'zustand/shallow'
 
 interface TimelineProps {
   taskId: string
@@ -28,7 +29,16 @@ interface TimelineProps {
  * date-grouping accordion headers, and instant timeline search.
  */
 export default function Timeline({ taskId, onBack }: { taskId: string; onBack?: () => void }) {
-  const { rollups, selectedTask, activeTask, selectedRollupId, setSelectedRollupId } = useTaskStore()
+  const { rollups, selectedTaskTitle, activeTaskId, selectedRollupId, setSelectedRollupId } = useTaskStore(
+    (state) => ({
+      rollups: state.rollups,
+      selectedTaskTitle: state.selectedTask?.title ?? 'Activity Timeline',
+      activeTaskId: state.activeTask?.id ?? null,
+      selectedRollupId: state.selectedRollupId,
+      setSelectedRollupId: state.setSelectedRollupId,
+    }),
+    shallow,
+  )
   const [searchQuery, setSearchQuery] = useState('')
   const [workstreamFilter, setWorkstreamFilter] = useState<string | null>(null)
   const [collapsedDates, setCollapsedDates] = useState<Record<string, boolean>>({})
@@ -98,7 +108,7 @@ export default function Timeline({ taskId, onBack }: { taskId: string; onBack?: 
 
   const containerV = useStaggerContainer(0.04)
   const itemV = useStaggerItem()
-  const isActive = activeTask?.id === taskId
+  const isActive = activeTaskId === taskId
 
   return (
     <div className="flex h-full flex-col">
@@ -140,9 +150,9 @@ export default function Timeline({ taskId, onBack }: { taskId: string; onBack?: 
             </span>
             <h2
               className="line-clamp-1 text-base font-semibold tracking-tight text-white"
-              title={selectedTask?.title ?? 'Activity Timeline'}
+              title={selectedTaskTitle}
             >
-              {selectedTask?.title ?? 'Timeline'}
+              {selectedTaskTitle}
             </h2>
           </div>
           <span className="text-[11px] text-white/35 tabular-nums shrink-0 ml-2">
