@@ -2203,6 +2203,7 @@ mod tests {
             relevance: 0.0,
             timestamp: "2026-07-27T10:00:00+00:00".to_string(),
             created_at: "2026-07-27T10:00:00+00:00".to_string(),
+            activity: None,
         }
     }
 

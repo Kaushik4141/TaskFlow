@@ -17,6 +17,7 @@ import type { Event } from '../types'
 import { useStaggerContainer, useStaggerItem } from '../lib/motion'
 import AppLogo from './AppLogo'
 import { cleanAppName, cleanWindowTitle } from '../lib/activityFormat'
+import { activityPredictionText } from '../lib/activityClassification'
 
 interface EventFeedProps {
   taskId?: string
@@ -139,6 +140,7 @@ function EventRow({ event }: { event: Event }) {
   const faded = event.captureMethod === 'title_only'
   const domain = event.url ? domainFor(event.url) : null
   const hasContent = !!event.content
+  const activityText = activityPredictionText(event.activity)
   const tooltip = [
     event.windowTitle ? `Title: ${event.windowTitle}` : null,
     event.url ? `URL: ${event.url}` : null,
@@ -192,6 +194,7 @@ function EventRow({ event }: { event: Event }) {
             )}
           </div>
           <p className="truncate text-xs text-white/45">{truncate(cleanWindowTitle(title), 54)}</p>
+          {activityText && <p className="mt-0.5 text-[11px] text-white/60">{activityText}</p>}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <time className="font-mono text-[10px] text-white/35 tabular-nums">

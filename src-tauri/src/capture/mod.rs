@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod chunker;
 pub mod cleaner;
 pub mod clipboard;

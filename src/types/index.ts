@@ -18,6 +18,13 @@ export interface Task {
   createdAt: string
 }
 
+export interface ActivityPrediction {
+  category: string
+  confidence: number
+  uncertain: boolean
+  model_version: string
+}
+
 export interface Event {
   id: string
   taskId: string
@@ -33,6 +40,8 @@ export interface Event {
   relevance: number
   timestamp: string
   createdAt: string
+  /** Missing on legacy API payloads; null for events without a prediction. */
+  activity?: ActivityPrediction | null
 }
 
 export interface Note {
@@ -230,4 +239,3 @@ export interface CloudStatus {
   userAvatar: string | null
   mcpGatewayUrl?: string | null
 }
-

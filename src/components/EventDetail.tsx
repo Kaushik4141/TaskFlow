@@ -20,6 +20,7 @@ import { useTaskStore } from '../stores/taskStore'
 import AppLogo from './AppLogo'
 import { useToastStore } from '../stores/toastStore'
 import { formatActivityTitle, cleanAppName, cleanWindowTitle } from '../lib/activityFormat'
+import { activityPredictionText } from '../lib/activityClassification'
 import { shallow } from 'zustand/shallow'
 
 function ClockSvg({ className = 'h-3.5 w-3.5' }: { className?: string }) {
@@ -610,6 +611,7 @@ export default function EventDetail({ rollup, taskTitle, onBack }: EventDetailPr
 
 function RawEventRow({ event }: { event: Event }) {
   const [expanded, setExpanded] = useState(false)
+  const activityText = activityPredictionText(event.activity)
   const timeStr = useMemo(() => {
     try {
       return format(parseISO(event.timestamp), 'HH:mm:ss')
@@ -643,6 +645,8 @@ function RawEventRow({ event }: { event: Event }) {
           )}
         </div>
       </div>
+
+      {activityText && <p className="mt-1 text-[11px] text-white/60">{activityText}</p>}
 
       {expanded && event.content && (
         <div className="mt-2 rounded-lg border border-white/[0.06] bg-black/50 p-2.5 text-[11px] font-mono text-white/70 whitespace-pre-wrap max-h-48 overflow-y-auto">

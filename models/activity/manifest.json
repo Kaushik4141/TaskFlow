@@ -1,0 +1,494 @@
+{
+  "format_version": 1,
+  "feature_version": 1,
+  "model_version": "synthetic-bootstrap-v2",
+  "dimensions": 8192,
+  "categories": [
+    "coding_debugging",
+    "research_learning",
+    "writing_documentation",
+    "communication",
+    "planning_administration",
+    "entertainment_media",
+    "system_navigation",
+    "other"
+  ],
+  "parameter_count": 65544,
+  "artifact_bytes": 262176,
+  "layout": "class_major_weights_then_biases_f32le",
+  "sha256": "eb5ede915be185ca13624141c8f1cb3f3fa7d8d7a57878ac601e3b25b92cd20a",
+  "provenance": "Entirely curated synthetic nonprivate examples; no captured activity or private data.",
+  "training": {
+    "algorithm": "sparse multiclass softmax SGD with epoch L2 shrink",
+    "seed": 4141,
+    "epochs": 65,
+    "learning_rate": "0.75/(1+epoch*0.025)",
+    "epoch_weight_decay": 0.998,
+    "bias_learning_rate_multiplier": 0.05,
+    "examples": 1080,
+    "per_category": 135,
+    "app_only_regularization": "Uniform-target cross-entropy on 15 generic browser/editor/terminal identities, four passes per epoch; not labelled Other or included in evaluation."
+  },
+  "split": "Authored scenario-template/session/project-disjoint holdout; all app/metadata/OCR variants grouped, no random row split.",
+  "confidence": "Uncalibrated bootstrap softmax score, not a calibrated probability of correctness.",
+  "abstention": {
+    "min_confidence": 0.65,
+    "min_margin": 0.2,
+    "min_supported_features": 4,
+    "min_support_fraction": 0.35,
+    "support_weight_threshold": 0.1
+  },
+  "synthetic_training_evaluation": {
+    "examples": 1080,
+    "correct_top1": 1080,
+    "top1_fraction": 1.0,
+    "accepted": 1058,
+    "accepted_correct": 1058,
+    "accepted_fraction": 0.9796296296296296,
+    "confusion_actual_rows_predicted_columns": [
+      [
+        135,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        135,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        135,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        135,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        135,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        135,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        135,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        135
+      ]
+    ]
+  },
+  "synthetic_holdout_evaluation": {
+    "examples": 360,
+    "correct_top1": 328,
+    "top1_fraction": 0.9111111111111111,
+    "accepted": 278,
+    "accepted_correct": 278,
+    "accepted_fraction": 0.7722222222222223,
+    "confusion_actual_rows_predicted_columns": [
+      [
+        32,
+        6,
+        5,
+        1,
+        0,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        45,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        44,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        45,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        45,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        3,
+        2,
+        0,
+        39,
+        0,
+        0
+      ],
+      [
+        0,
+        6,
+        0,
+        0,
+        0,
+        0,
+        39,
+        0
+      ],
+      [
+        0,
+        6,
+        0,
+        0,
+        0,
+        0,
+        0,
+        39
+      ]
+    ]
+  },
+  "synthetic_holdout_slices": {
+    "metadata_only": {
+      "examples": 72,
+      "correct_top1": 70,
+      "top1_fraction": 0.9722222222222222,
+      "accepted": 51,
+      "accepted_correct": 51,
+      "accepted_fraction": 0.7083333333333334,
+      "confusion_actual_rows_predicted_columns": [
+        [
+          7,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          9,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          9,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          9,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          9,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          9,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          9,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          9
+        ]
+      ]
+    },
+    "noisy_ocr": {
+      "examples": 144,
+      "correct_top1": 138,
+      "top1_fraction": 0.9583333333333334,
+      "accepted": 138,
+      "accepted_correct": 138,
+      "accepted_fraction": 0.9583333333333334,
+      "confusion_actual_rows_predicted_columns": [
+        [
+          12,
+          4,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          18,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          18,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          18,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          18,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          18,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          18,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          18
+        ]
+      ]
+    },
+    "chrome_only_content": {
+      "examples": 72,
+      "correct_top1": 50,
+      "top1_fraction": 0.6944444444444444,
+      "accepted": 20,
+      "accepted_correct": 20,
+      "accepted_fraction": 0.2777777777777778,
+      "confusion_actual_rows_predicted_columns": [
+        [
+          6,
+          1,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          9,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          8,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          9,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          9,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          3,
+          2,
+          0,
+          3,
+          0,
+          0
+        ],
+        [
+          0,
+          6,
+          0,
+          0,
+          0,
+          0,
+          3,
+          0
+        ],
+        [
+          0,
+          6,
+          0,
+          0,
+          0,
+          0,
+          0,
+          3
+        ]
+      ]
+    }
+  },
+  "limitations": "Synthetic-only evaluation is not real-world accuracy; English/ASCII features; ambiguous/mixed activities and hash collisions remain. Holdout shares category vocabulary; no calibration or independent external validation."
+}

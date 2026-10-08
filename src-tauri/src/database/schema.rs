@@ -37,6 +37,21 @@ pub async fn run_migrations(db: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .await?;
 
+    // Predictions are observational metadata, kept separately from retained
+    // screen text. No backfill: existing private history remains unclassified.
+    db.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS activity_annotations (
+            event_id      TEXT PRIMARY KEY NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            category      TEXT NOT NULL,
+            confidence    REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+            uncertain     INTEGER NOT NULL CHECK (uncertain IN (0, 1)),
+            model_version TEXT NOT NULL
+        );
+        "#,
+    )
+    .await?;
+
     db.execute(
         r#"
         CREATE TABLE IF NOT EXISTS documentation (
@@ -267,6 +282,31 @@ async fn drop_snapshot_artifacts(db: &SqlitePool) -> Result<(), sqlx::Error> {
 mod tests {
     use super::{drop_snapshot_artifacts, run_migrations};
     use sqlx::{Executor, SqlitePool};
+
+    #[tokio::test]
+    async fn activity_annotation_migration_is_idempotent_without_backfilling_history() {
+        let db = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&db).await.unwrap();
+        db.execute("INSERT INTO tasks (id, title) VALUES ('activity-task', 'Activity'); \
+            INSERT INTO events (id, task_id, event_type, timestamp) VALUES ('legacy', 'activity-task', 'window_switch', '2026-07-01T00:00:00+00:00'); \
+            INSERT INTO events (id, task_id, event_type, timestamp) VALUES ('annotated', 'activity-task', 'window_switch', '2026-07-01T00:00:00+00:00'); \
+            INSERT INTO activity_annotations (event_id, category, confidence, uncertain, model_version) VALUES ('annotated', 'coding_debugging', 0.8, 0, 'test-model');").await.unwrap();
+        run_migrations(&db).await.unwrap();
+        run_migrations(&db).await.unwrap();
+        let rows: Vec<(String, String, f64, bool, String)> = sqlx::query_as(
+            "SELECT event_id, category, confidence, uncertain, model_version FROM activity_annotations",
+        ).fetch_all(&db).await.unwrap();
+        assert_eq!(
+            rows,
+            vec![(
+                "annotated".into(),
+                "coding_debugging".into(),
+                0.8,
+                false,
+                "test-model".into()
+            )]
+        );
+    }
 
     /// Recreates the abandoned subsystem exactly as commit 1e8adb4 left it in
     /// existing installs, then asserts the teardown clears every object —

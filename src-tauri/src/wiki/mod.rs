@@ -937,6 +937,7 @@ mod tests {
             relevance: 1.0,
             timestamp: "2026-07-10T10:00:00+00:00".to_string(),
             created_at: "2026-07-10T10:00:00+00:00".to_string(),
+            activity: None,
         }
     }
 
