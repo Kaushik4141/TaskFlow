@@ -2,7 +2,10 @@ use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
-    sync::atomic::Ordering,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Mutex,
+    },
     time::Duration,
 };
 
@@ -100,10 +103,11 @@ pub async fn create_task(
     description: Option<String>,
     source: String,
 ) -> Result<Task, String> {
+    let generation = begin_capture_transition(&state)?;
     let task = tasks::create_task(&state.db, title, description, source)
         .await
         .map_err(|err| err.to_string())?;
-    set_active_task_id(&state, Some(task.id.clone()))?;
+    finish_capture_transition(&state, generation, Some(task.id.clone()))?;
     Ok(task)
 }
 
@@ -123,19 +127,25 @@ pub async fn get_active_task(state: State<'_, AppState>) -> Result<Option<Task>,
 
 #[tauri::command]
 pub async fn start_task(state: State<'_, AppState>, id: String) -> Result<Task, String> {
+    let generation = begin_capture_transition(&state)?;
     let task = tasks::update_task_status(&state.db, id, "active".to_string())
         .await
         .map_err(|err| err.to_string())?;
-    set_active_task_id(&state, Some(task.id.clone()))?;
+    finish_capture_transition(&state, generation, Some(task.id.clone()))?;
     Ok(task)
 }
 
 #[tauri::command]
 pub async fn stop_task(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<Task, String> {
+    // Invalidate admission and in-flight capture work before the first await.
+    // A failed stop deliberately leaves capture paused; it must not
+    // accidentally resume after a partial task transition.
+    state.capture_paused.store(true, Ordering::SeqCst);
+    let generation = begin_capture_transition(&state)?;
     let task = tasks::end_task(&state.db, id)
         .await
         .map_err(|err| err.to_string())?;
-    set_active_task_id(&state, None)?;
+    finish_capture_transition(&state, generation, None)?;
     // Stop = flush: roll up whatever was captured since the last window
     // boundary so the final stretch lands in the workstream timeline now,
     // rather than waiting for the scheduler. A skip (no pending events, or
@@ -621,42 +631,21 @@ pub async fn get_capture_stats(
     state: State<'_, AppState>,
     task_id: String,
 ) -> Result<CaptureStats, String> {
-    let events = events::get_events_for_task(&state.db, task_id)
+    let aggregate = events::get_capture_stats_aggregate(&state.db, &task_id)
         .await
         .map_err(|err| err.to_string())?;
-    let mut by_app = HashMap::new();
-    let mut with_content = 0u32;
-    let mut with_url = 0u32;
-    let mut title_only = 0u32;
-
-    for event in &events {
-        if event
-            .content
-            .as_deref()
-            .is_some_and(|value| !value.trim().is_empty())
-        {
-            with_content += 1;
-        }
-        if event
-            .url
-            .as_deref()
-            .is_some_and(|value| !value.trim().is_empty())
-        {
-            with_url += 1;
-        }
-        if event.capture_method.as_deref() == Some("title_only") {
-            title_only += 1;
-        }
-        if let Some(app_name) = &event.app_name {
-            *by_app.entry(app_name.clone()).or_insert(0) += 1;
-        }
-    }
+    let by_app = events::get_capture_stats_by_app(&state.db, &task_id)
+        .await
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .map(|(app_name, count)| (app_name, count.max(0) as u32))
+        .collect::<HashMap<_, _>>();
 
     Ok(CaptureStats {
-        total_events: events.len() as u32,
-        with_content,
-        with_url,
-        title_only,
+        total_events: aggregate.total_events.max(0) as u32,
+        with_content: aggregate.with_content.max(0) as u32,
+        with_url: aggregate.with_url.max(0) as u32,
+        title_only: aggregate.title_only.max(0) as u32,
         excluded: 0,
         by_app,
     })
@@ -726,6 +715,14 @@ pub async fn update_capture_workflow(
     };
     let retention_hours = retention_hours.clamp(1, 168);
 
+    // Only enabling an autonomous workflow is an activation transition. A
+    // manual-mode settings save must not invalidate work or resume capture.
+    let generation = if workflow_mode.captures_without_manual_task() {
+        Some(begin_capture_transition(&state)?)
+    } else {
+        None
+    };
+
     save_setting(&state.db, "capture_workflow", &mode).await?;
     save_setting(&state.db, "selective_capture_apps", &selective_apps.join("\n")).await?;
     save_setting(
@@ -750,11 +747,11 @@ pub async fn update_capture_workflow(
         *apps = selective_apps;
     }
 
-    if workflow_mode.captures_without_manual_task() {
+    if let Some(generation) = generation {
         let task = tasks::get_or_create_daily_capture_task(&state.db)
             .await
             .map_err(|err| err.to_string())?;
-        set_active_task_id(&state, Some(task.id.clone()))?;
+        finish_capture_transition(&state, generation, Some(task.id.clone()))?;
         Ok(Some(task))
     } else {
         Ok(None)
@@ -773,10 +770,11 @@ pub async fn ensure_daily_capture_task(state: State<'_, AppState>) -> Result<Opt
         return Ok(None);
     }
 
+    let generation = begin_capture_transition(&state)?;
     let task = tasks::get_or_create_daily_capture_task(&state.db)
         .await
         .map_err(|err| err.to_string())?;
-    set_active_task_id(&state, Some(task.id.clone()))?;
+    finish_capture_transition(&state, generation, Some(task.id.clone()))?;
     Ok(Some(task))
 }
 
@@ -1299,6 +1297,7 @@ pub async fn create_task_from_ticket(
     ticket_id: String,
     source_branch: Option<String>,
 ) -> Result<Task, String> {
+    let generation = begin_capture_transition(&state)?;
     let ticket = integration_store::get_ticket_by_id(&state.db, &ticket_id).await?;
     let task = tasks::create_task_with_source_context(
         &state.db,
@@ -1319,7 +1318,7 @@ pub async fn create_task_from_ticket(
     )
     .await
     .map_err(|err| err.to_string())?;
-    set_active_task_id(&state, Some(task.id.clone()))?;
+    finish_capture_transition(&state, generation, Some(task.id.clone()))?;
     Ok(task)
 }
 
@@ -1372,12 +1371,52 @@ fn provider_label(provider: &str) -> &'static str {
     }
 }
 
-fn set_active_task_id(state: &State<'_, AppState>, id: Option<String>) -> Result<(), String> {
-    let mut active_task_id = state
+fn begin_capture_transition(state: &State<'_, AppState>) -> Result<u64, String> {
+    // Pause even on a poisoned state lock or failed DB activation. Admission
+    // resumes only after an explicit, successful activation command.
+    state.capture_paused.store(true, Ordering::SeqCst);
+    let _active_task_id = state
         .active_task_id
         .lock()
         .map_err(|_| "active task state lock poisoned".to_string())?;
+    state.capture_paused.store(true, Ordering::SeqCst);
+    Ok(state.capture_generation.fetch_add(1, Ordering::SeqCst) + 1)
+}
+
+fn finish_capture_transition(
+    state: &State<'_, AppState>,
+    generation: u64,
+    id: Option<String>,
+) -> Result<(), String> {
+    finish_capture_transition_state(
+        &state.active_task_id,
+        &state.capture_paused,
+        &state.capture_generation,
+        generation,
+        id,
+    )
+}
+
+fn finish_capture_transition_state(
+    active_task_id: &Mutex<Option<String>>,
+    capture_paused: &AtomicBool,
+    capture_generation: &AtomicU64,
+    generation: u64,
+    id: Option<String>,
+) -> Result<(), String> {
+    let mut active_task_id = active_task_id
+        .lock()
+        .map_err(|_| "active task state lock poisoned".to_string())?;
+    // A slower activation must not undo a Stop that arrived while its DB
+    // writes were awaiting. Likewise a stale Stop must not clear a new task.
+    if capture_generation.load(Ordering::SeqCst) != generation {
+        return Err("Capture transition was superseded by a newer command.".to_string());
+    }
+    let should_resume = id.is_some();
     *active_task_id = id;
+    if should_resume {
+        capture_paused.store(false, Ordering::SeqCst);
+    }
     Ok(())
 }
 

@@ -184,12 +184,21 @@ pub async fn run_migrations(db: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .await?;
 
-    // Retention pruning and the daily index both scan by timestamp across all
-    // tasks, which the task_id/timestamp access paths don't cover.
+    // Capture/event feeds and roll-up flushes are task-scoped time-range
+    // queries. Keep the composite indexes in timestamp order so SQLite does
+    // not scan a task's entire event history during each capture window.
+    db.execute("CREATE INDEX IF NOT EXISTS idx_events_task_timestamp ON events(task_id, timestamp)")
+        .await?;
     db.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)")
         .await?;
 
-    // Index rollups for sub-millisecond range scans and project filtering at 100K+ scale.
+    // Index rollups for task timeline/range scans and project filtering at
+    // 100K+ scale. Both window bounds are queried by the scheduler and
+    // historical timeline views.
+    db.execute("CREATE INDEX IF NOT EXISTS idx_rollups_task_window_start ON rollups(task_id, window_start)")
+        .await?;
+    db.execute("CREATE INDEX IF NOT EXISTS idx_rollups_task_window_end ON rollups(task_id, window_end)")
+        .await?;
     db.execute("CREATE INDEX IF NOT EXISTS idx_rollups_window_range ON rollups(window_start, window_end)")
         .await?;
     db.execute("CREATE INDEX IF NOT EXISTS idx_rollups_workstream_window ON rollups(workstream_slug, window_start)")
@@ -357,6 +366,52 @@ mod tests {
             .expect("in-memory sqlite");
         run_migrations(&db).await.expect("migrations include teardown");
         drop_snapshot_artifacts(&db).await.expect("no-op");
+    }
+
+    #[tokio::test]
+    async fn migrations_create_task_time_indexes() {
+        let db = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+        run_migrations(&db).await.expect("migrations");
+
+        let event_indexes: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events'")
+                .fetch_all(&db)
+                .await
+                .expect("event indexes");
+        assert!(event_indexes.iter().any(|name| name == "idx_events_task_timestamp"));
+
+        let rollup_indexes: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'rollups'")
+                .fetch_all(&db)
+                .await
+                .expect("rollup indexes");
+        for expected in [
+            "idx_rollups_task_window_start",
+            "idx_rollups_task_window_end",
+        ] {
+            assert!(rollup_indexes.iter().any(|name| name == expected));
+        }
+
+        for (index_name, expected) in [
+            ("idx_events_task_timestamp", vec!["task_id", "timestamp"]),
+            ("idx_rollups_task_window_start", vec!["task_id", "window_start"]),
+            ("idx_rollups_task_window_end", vec!["task_id", "window_end"]),
+        ] {
+            let columns: Vec<(i64, i64, String)> =
+                sqlx::query_as(&format!("PRAGMA index_info({index_name})"))
+                    .fetch_all(&db)
+                    .await
+                    .expect("index columns");
+            assert_eq!(
+                columns.into_iter().map(|(_, _, name)| name).collect::<Vec<_>>(),
+                expected
+            );
+        }
+
+        // Upgrades run this function again on existing installations.
+        run_migrations(&db).await.expect("idempotent migrations");
     }
 }
 

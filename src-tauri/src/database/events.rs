@@ -6,6 +6,11 @@ use uuid::Uuid;
 use crate::capture::chunker::ContentChunk;
 use crate::capture::types::CapturedContent;
 
+// SQLite's one-argument trim removes only ASCII spaces. Use the same Unicode
+// whitespace set as Rust str::trim, preserving the capture-stat API semantics
+// for clipboard/OCR content consisting only of tabs, newlines or NBSPs.
+const CAPTURE_STATS_WHITESPACE: &str = "\u{0009}\u{000a}\u{000b}\u{000c}\u{000d}\u{0020}\u{0085}\u{00a0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}";
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
@@ -33,6 +38,60 @@ pub struct Note {
     pub content: String,
     pub app_name: Option<String>,
     pub timestamp: String,
+}
+
+/// Counts used by the capture statistics view. This deliberately contains no
+/// event content: the stats command must remain cheap even for a large task
+/// with retained screen text.
+#[derive(Debug, Clone, FromRow)]
+pub struct CaptureStatsAggregate {
+    pub total_events: i64,
+    pub with_content: i64,
+    pub with_url: i64,
+    pub title_only: i64,
+}
+
+pub async fn get_capture_stats_aggregate(
+    db: &SqlitePool,
+    task_id: &str,
+) -> Result<CaptureStatsAggregate, sqlx::Error> {
+    sqlx::query_as::<_, CaptureStatsAggregate>(
+        r#"
+        SELECT
+            COUNT(*) AS total_events,
+            COALESCE(SUM(CASE WHEN content IS NOT NULL AND trim(content, ?2) <> '' THEN 1 ELSE 0 END), 0)
+                AS with_content,
+            COALESCE(SUM(CASE WHEN url IS NOT NULL AND trim(url, ?2) <> '' THEN 1 ELSE 0 END), 0)
+                AS with_url,
+            COALESCE(SUM(CASE WHEN capture_method = 'title_only' THEN 1 ELSE 0 END), 0) AS title_only
+        FROM events
+        WHERE task_id = ?1
+        "#,
+    )
+    .bind(task_id)
+    .bind(CAPTURE_STATS_WHITESPACE)
+    .fetch_one(db)
+    .await
+}
+
+/// Counts events by app without selecting any event payload columns. NULL app
+/// names are omitted to preserve the command's historical API behavior.
+pub async fn get_capture_stats_by_app(
+    db: &SqlitePool,
+    task_id: &str,
+) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    sqlx::query_as::<_, (String, i64)>(
+        r#"
+        SELECT app_name, COUNT(*)
+        FROM events
+        WHERE task_id = ?1 AND app_name IS NOT NULL
+        GROUP BY app_name
+        ORDER BY app_name ASC
+        "#,
+    )
+    .bind(task_id)
+    .fetch_all(db)
+    .await
 }
 
 pub async fn insert_event(
@@ -109,46 +168,96 @@ pub async fn insert_captured_chunks(
     captured: CapturedContent,
     chunks: Vec<ContentChunk>,
 ) -> Result<Vec<Event>, sqlx::Error> {
+    // A capture can produce several chunks. Commit them as one unit so an
+    // SQLITE_BUSY/error cannot leave a partial screen capture in the feed.
+    // RETURNING avoids a separate pool checkout/readback for every chunk.
+    // Rows are only exposed to the caller after a successful commit.
+    let mut transaction = db.begin().await?;
     let mut events = Vec::with_capacity(chunks.len().max(1));
-    if chunks.is_empty() {
-        events.push(
-            insert_event_with_metadata(
-                db,
-                captured.task_id,
-                "window_switch".to_string(),
-                Some(captured.app_name),
-                Some(captured.window_title),
-                captured.text,
-                captured.url,
-                Some(captured.content_type.as_str().to_string()),
-                Some(captured.capture_method),
-                true,
-                0,
-            )
-            .await?,
-        );
-        return Ok(events);
-    }
+    let content_type = captured.content_type.as_str().to_string();
+    let (task_id, app_name, window_title, url, capture_method, content) = (
+        captured.task_id,
+        captured.app_name,
+        captured.window_title,
+        captured.url,
+        captured.capture_method,
+        captured.text,
+    );
 
-    for (index, chunk) in chunks.into_iter().enumerate() {
-        events.push(
-            insert_event_with_metadata(
-                db,
-                captured.task_id.clone(),
-                "window_switch".to_string(),
-                Some(captured.app_name.clone()),
-                Some(captured.window_title.clone()),
+    if chunks.is_empty() {
+        let event = insert_captured_chunk_row(
+            &mut transaction,
+            &task_id,
+            &app_name,
+            &window_title,
+            content,
+            url.as_deref(),
+            &content_type,
+            &capture_method,
+            0,
+        )
+        .await?;
+        events.push(event);
+    } else {
+        for (index, chunk) in chunks.into_iter().enumerate() {
+            let event = insert_captured_chunk_row(
+                &mut transaction,
+                &task_id,
+                &app_name,
+                &window_title,
                 Some(chunk.text),
-                captured.url.clone(),
-                Some(captured.content_type.as_str().to_string()),
-                Some(captured.capture_method.clone()),
-                true,
+                url.as_deref(),
+                &content_type,
+                &capture_method,
                 index as i64,
             )
-            .await?,
-        );
+            .await?;
+            events.push(event);
+        }
     }
+    transaction.commit().await?;
+
     Ok(events)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_captured_chunk_row(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    task_id: &str,
+    app_name: &str,
+    window_title: &str,
+    content: Option<String>,
+    url: Option<&str>,
+    content_type: &str,
+    capture_method: &str,
+    chunk_index: i64,
+) -> Result<Event, sqlx::Error> {
+    let id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    sqlx::query_as::<_, Event>(
+        r#"
+        INSERT INTO events
+            (id, task_id, event_type, app_name, window_title, content, url,
+             content_type, capture_method, is_sanitized, chunk_index, relevance,
+             timestamp, created_at)
+        VALUES (?1, ?2, 'window_switch', ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, 0.0, ?10, ?10)
+        RETURNING id, task_id, event_type, app_name, window_title, content, url,
+                  content_type, capture_method, is_sanitized, chunk_index,
+                  relevance, timestamp, created_at
+        "#,
+    )
+    .bind(&id)
+    .bind(task_id)
+    .bind(app_name)
+    .bind(window_title)
+    .bind(content)
+    .bind(url)
+    .bind(content_type)
+    .bind(capture_method)
+    .bind(chunk_index)
+    .bind(&now)
+    .fetch_one(&mut **transaction)
+    .await
 }
 
 pub async fn update_event_content(
@@ -336,6 +445,86 @@ pub async fn add_note(
         app_name,
         timestamp: now,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{get_capture_stats_aggregate, get_capture_stats_by_app};
+    use crate::database::schema::run_migrations;
+    use sqlx::{Executor, SqlitePool};
+
+    async fn memory_db() -> SqlitePool {
+        let db = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+        run_migrations(&db).await.expect("migrations");
+        db.execute(
+            "INSERT INTO tasks (id, title, source, status, created_at) \
+             VALUES ('stats-task', 'Stats', 'manual', 'active', '2026-07-01T00:00:00+00:00')",
+        )
+        .await
+        .expect("seed task");
+        db.execute(
+            "INSERT INTO tasks (id, title, source, status, created_at) \
+             VALUES ('other-task', 'Other', 'manual', 'active', '2026-07-01T00:00:00+00:00')",
+        )
+        .await
+        .expect("seed other task");
+        db
+    }
+
+    #[tokio::test]
+    async fn capture_stats_aggregate_counts_without_loading_content() {
+        let db = memory_db().await;
+        for (id, app, content, url, method) in [
+            ("e1", "Editor", Some("screen text"), Some("https://example.test"), "uia"),
+            ("e2", "Editor", Some("   "), Some("  "), "title_only"),
+            ("e3", "Browser", None, Some("https://example.test/docs"), "uia"),
+            ("e4", "Browser", None, None, "title_only"),
+            ("e5", "Noisy", Some("ignored task"), None, "uia"),
+        ] {
+            sqlx::query(
+                "INSERT INTO events \
+                 (id, task_id, event_type, app_name, content, url, capture_method, timestamp) \
+                 VALUES (?1, ?2, 'window_switch', ?3, ?4, ?5, ?6, ?7)",
+            )
+            .bind(id)
+            .bind(if id == "e5" { "other-task" } else { "stats-task" })
+            .bind(app)
+            .bind(content)
+            .bind(url)
+            .bind(method)
+            .bind("2026-07-01T00:00:00+00:00")
+            .execute(&db)
+            .await
+            .expect("seed event");
+        }
+
+        let aggregate = get_capture_stats_aggregate(&db, "stats-task")
+            .await
+            .expect("aggregate");
+        assert_eq!(aggregate.total_events, 4);
+        assert_eq!(aggregate.with_content, 1);
+        assert_eq!(aggregate.with_url, 2);
+        assert_eq!(aggregate.title_only, 2);
+
+        let by_app = get_capture_stats_by_app(&db, "stats-task")
+            .await
+            .expect("app aggregate");
+        assert_eq!(by_app, vec![("Browser".to_string(), 2), ("Editor".to_string(), 2)]);
+    }
+
+    #[tokio::test]
+    async fn capture_stats_empty_task_returns_zeroes() {
+        let db = memory_db().await;
+        let aggregate = get_capture_stats_aggregate(&db, "stats-task")
+            .await
+            .expect("aggregate");
+        assert_eq!(aggregate.total_events, 0);
+        assert_eq!(aggregate.with_content, 0);
+        assert_eq!(aggregate.with_url, 0);
+        assert_eq!(aggregate.title_only, 0);
+    }
 }
 
 async fn get_event_by_id(db: &SqlitePool, id: &str) -> Result<Event, sqlx::Error> {

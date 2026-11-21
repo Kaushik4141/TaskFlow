@@ -529,8 +529,7 @@ function CloudSection() {
               taskflow: {
                 command: 'python3',
                 args: [
-                  '-m',
-                  'sidecar.mcp_server',
+                  'mcp-cloud/mcp_server.py',
                   '--user-id',
                   effectiveUserId,
                 ],

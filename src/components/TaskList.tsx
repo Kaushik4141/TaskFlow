@@ -8,14 +8,15 @@ import TaskFlowLogo from './TaskFlowLogo'
 import AppLogo from './AppLogo'
 import { HoverCard, modalVariants, motion, selectionSpring, useStaggerContainer, useStaggerItem } from '../lib/motion'
 import type { Integration, Task, Ticket } from '../types'
+import { shallow } from 'zustand/shallow'
 
 const sourceOptions: Task['source'][] = ['manual', 'jira', 'github', 'linear']
 
 export default function TaskList({ onSelectTimeline }: { onSelectTimeline?: () => void } = {}) {
   const {
     tasks,
-    selectedTask,
-    events,
+    selectedTaskId,
+    eventCount,
     integrations,
     ticketSearchResults,
     isSyncingTickets,
@@ -26,7 +27,24 @@ export default function TaskList({ onSelectTimeline }: { onSelectTimeline?: () =
     searchTickets,
     createTaskFromTicket,
     setSettingsOpen,
-  } = useTaskStore()
+  } = useTaskStore(
+    (state) => ({
+      tasks: state.tasks,
+      selectedTaskId: state.selectedTask?.id ?? null,
+      eventCount: state.events.length,
+      integrations: state.integrations,
+      ticketSearchResults: state.ticketSearchResults,
+      isSyncingTickets: state.isSyncingTickets,
+      syncProgress: state.syncProgress,
+      createTask: state.createTask,
+      selectTask: state.selectTask,
+      syncTickets: state.syncTickets,
+      searchTickets: state.searchTickets,
+      createTaskFromTicket: state.createTaskFromTicket,
+      setSettingsOpen: state.setSettingsOpen,
+    }),
+    shallow,
+  )
   const [modalOpen, setModalOpen] = useState(false)
   const [tab, setTab] = useState<'manual' | 'ticket'>('manual')
   const [title, setTitle] = useState('')
@@ -52,11 +70,15 @@ export default function TaskList({ onSelectTimeline }: { onSelectTimeline?: () =
       return
     }
 
-    await createTask(title.trim(), description.trim() || null, source)
-    setTitle('')
-    setDescription('')
-    setSource('manual')
-    setModalOpen(false)
+    try {
+      await createTask(title.trim(), description.trim() || null, source)
+      setTitle('')
+      setDescription('')
+      setSource('manual')
+      setModalOpen(false)
+    } catch {
+      // The store displays the failure; retain the user's draft for retry.
+    }
   }
 
   useEffect(() => {
@@ -64,7 +86,9 @@ export default function TaskList({ onSelectTimeline }: { onSelectTimeline?: () =
       return
     }
     const handle = window.setTimeout(() => {
-      void searchTickets(ticketQuery.trim())
+      void searchTickets(ticketQuery.trim()).catch((error) => {
+        setNotice(error instanceof Error ? error.message : String(error))
+      })
     }, 300)
     return () => window.clearTimeout(handle)
   }, [modalOpen, searchTickets, tab, ticketQuery])
@@ -143,10 +167,12 @@ export default function TaskList({ onSelectTimeline }: { onSelectTimeline?: () =
                 <TaskRow
                   key={task.id}
                   task={task}
-                  selected={selectedTask?.id === task.id}
-                  eventCount={selectedTask?.id === task.id ? events.length : 0}
+                  selected={selectedTaskId === task.id}
+                  eventCount={selectedTaskId === task.id ? eventCount : 0}
                   onClick={() => {
-                    void selectTask(task)
+                    void selectTask(task).catch((error) => {
+                      setNotice(error instanceof Error ? error.message : String(error))
+                    })
                     onSelectTimeline?.()
                   }}
                 />

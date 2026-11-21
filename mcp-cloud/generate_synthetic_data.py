@@ -561,7 +561,7 @@ def write_isolated_mcp_config(db_path: Path, vault_path: Path, output_file: Path
         "mcpServers": {
             "taskflow-synthetic": {
                 "command": "python3",
-                "args": [str(Path(__file__).parent.parent / "sidecar" / "mcp_server.py") if (Path(__file__).parent.parent / "sidecar" / "mcp_server.py").exists() else str(Path(__file__).parent / "mcp_server.py")],
+                "args": [str(Path(__file__).parent.parent / "mcp-cloud" / "mcp_server.py") if (Path(__file__).parent.parent / "mcp-cloud" / "mcp_server.py").exists() else str(Path(__file__).parent / "mcp_server.py")],
                 "env": {
                     "TASKFLOW_VAULT": str(vault_path),
                     "TASKFLOW_DB": str(db_path)

@@ -8,20 +8,23 @@ import Documentation from './Documentation'
 import EventDetail from './EventDetail'
 import { SkeletonDocument } from './Skeleton'
 import { useStaggerContainer, useStaggerItem } from '../lib/motion'
+import { shallow } from 'zustand/shallow'
 
 export default function ActiveTask({ task }: { task: Task }) {
-  const {
-    addNote,
-    documentation,
-    isGenerating,
-    generateDocumentation,
-    fetchCaptureStats,
-    rollups,
-    selectedRollupId,
-    setSelectedRollupId,
-  } = useTaskStore()
+  const { addNote, documentation, isGenerating, generateDocumentation, rollups, selectedRollupId, setSelectedRollupId } =
+    useTaskStore(
+      (state) => ({
+        addNote: state.addNote,
+        documentation: state.documentation,
+        isGenerating: state.isGenerating,
+        generateDocumentation: state.generateDocumentation,
+        rollups: state.rollups,
+        selectedRollupId: state.selectedRollupId,
+        setSelectedRollupId: state.setSelectedRollupId,
+      }),
+      shallow,
+    )
   const [note, setNote] = useState('')
-  const [now, setNow] = useState(Date.now())
 
   const selectedRollup = useMemo(
     () => (selectedRollupId ? rollups.find((r) => r.id === selectedRollupId) ?? null : null),
@@ -34,29 +37,17 @@ export default function ActiveTask({ task }: { task: Task }) {
     }
   }, [selectedRollupId, rollups, setSelectedRollupId])
 
-  useEffect(() => {
-    if (task.status !== 'active') {
-      return
-    }
-    const timer = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(timer)
-  }, [task.status])
-
-  useEffect(() => {
-    void fetchCaptureStats(task.id)
-    const timer = window.setInterval(() => {
-      void fetchCaptureStats(task.id)
-    }, 10000)
-    return () => window.clearInterval(timer)
-  }, [fetchCaptureStats, task.id])
-
   const handleNote = async (event: FormEvent) => {
     event.preventDefault()
     if (!note.trim()) {
       return
     }
-    await addNote(task.id, note.trim())
-    setNote('')
+    try {
+      await addNote(task.id, note.trim())
+      setNote('')
+    } catch {
+      // The store reports backend errors where appropriate; keep the form usable.
+    }
   }
 
   const metricsV = useStaggerContainer(0.06)
@@ -119,7 +110,7 @@ export default function ActiveTask({ task }: { task: Task }) {
                     <Metric label="Status" value={task.status} accent={task.status === 'active'} />
                   </motion.div>
                   <motion.div variants={metricV}>
-                    <Metric label="Duration" value={duration(task, now)} />
+                    <DurationMetric task={task} />
                   </motion.div>
                   <motion.div variants={metricV}>
                     <Metric label="Created" value={new Date(task.createdAt).toLocaleString()} />
@@ -150,7 +141,7 @@ export default function ActiveTask({ task }: { task: Task }) {
                       whileHover={{ y: -1 }}
                       whileTap={{ scale: 0.98 }}
                       className="btn-primary mt-6"
-                      onClick={() => void generateDocumentation(task.id)}
+                      onClick={() => void generateDocumentation(task.id).catch(() => undefined)}
                     >
                       <SparklesIcon className="h-4 w-4" />
                       Generate Documentation
@@ -186,6 +177,46 @@ export default function ActiveTask({ task }: { task: Task }) {
       </form>
     </div>
   )
+}
+
+// Keep the one-second clock local to the value that actually uses it instead
+// of rerendering the workspace and its Markdown on every tick.
+function DurationMetric({ task }: { task: Task }) {
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    if (task.status !== 'active') {
+      return
+    }
+
+    let timer: number | null = null
+    const stopTimer = () => {
+      if (timer !== null) {
+        window.clearInterval(timer)
+        timer = null
+      }
+    }
+    const startTimer = () => {
+      if (document.hidden || timer !== null) {
+        return
+      }
+      setNow(Date.now())
+      timer = window.setInterval(() => setNow(Date.now()), 1000)
+    }
+    const onVisibilityChange = () => {
+      if (document.hidden) stopTimer()
+      else startTimer()
+    }
+
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    startTimer()
+    return () => {
+      stopTimer()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [task.status])
+
+  return <Metric label="Duration" value={duration(task, now)} />
 }
 
 function Metric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {

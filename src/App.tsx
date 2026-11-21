@@ -18,6 +18,7 @@ import { motion } from './lib/motion'
 import { useViewSwap } from './lib/motion'
 import { startTaskStoreListeners, useTaskStore } from './stores/taskStore'
 import WindowControls from './components/WindowControls'
+import { shallow } from 'zustand/shallow'
 
 export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(300)
@@ -63,7 +64,27 @@ export default function App() {
     startTask,
     stopTask,
     setSelectedRollupId,
-  } = useTaskStore()
+  } = useTaskStore(
+    (state) => ({
+      selectedTask: state.selectedTask,
+      activeTask: state.activeTask,
+      isGenerating: state.isGenerating,
+      fetchTasks: state.fetchTasks,
+      settingsOpen: state.settingsOpen,
+      setSettingsOpen: state.setSettingsOpen,
+      searchOpen: state.searchOpen,
+      setSearchOpen: state.setSearchOpen,
+      taskStats: state.taskStats,
+      onboardingCompleted: state.onboardingCompleted,
+      checkOnboarding: state.checkOnboarding,
+      completeOnboarding: state.completeOnboarding,
+      selectTaskById: state.selectTaskById,
+      startTask: state.startTask,
+      stopTask: state.stopTask,
+      setSelectedRollupId: state.setSelectedRollupId,
+    }),
+    shallow,
+  )
 
   const [helpOpen, setHelpOpen] = useState(false)
   const [sidebarView, setSidebarView] = useState<'tasks' | 'timeline'>('tasks')
@@ -82,20 +103,21 @@ export default function App() {
   }, [selectedTask])
 
   useEffect(() => {
-    startTaskStoreListeners()
-    void fetchTasks()
-    void checkOnboarding()
+    const stopTaskStoreListeners = startTaskStoreListeners()
+    void fetchTasks().catch(() => undefined)
+    void checkOnboarding().catch(() => undefined)
+    return stopTaskStoreListeners
   }, [fetchTasks, checkOnboarding])
 
   const isCapturing = activeTask !== null || selectedTask?.status === 'active'
 
   const handleToggleTask = useCallback(() => {
     if (activeTask) {
-      void stopTask(activeTask.id)
+      void stopTask(activeTask.id).catch(() => undefined)
     } else if (selectedTask?.status === 'active') {
-      void stopTask(selectedTask.id)
+      void stopTask(selectedTask.id).catch(() => undefined)
     } else if (selectedTask) {
-      void startTask(selectedTask.id)
+      void startTask(selectedTask.id).catch(() => undefined)
     }
   }, [activeTask, selectedTask, startTask, stopTask])
 
@@ -133,7 +155,7 @@ export default function App() {
   }
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden rounded-2xl bg-transparent">
+    <div className="relative h-screen w-screen overflow-hidden rounded-2xl bg-noir-950">
       <AmbientBackground />
       <main className="relative z-10 flex h-full flex-col text-white">
         {/* Top-Right Header Region: Two stacked rows */}

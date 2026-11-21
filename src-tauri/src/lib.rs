@@ -10,13 +10,9 @@ mod integrations;
 mod rollup;
 pub mod wiki;
 
-use std::{
-    path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex, RwLock,
-    },
-    time::Duration,
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64},
+    Arc, Mutex, RwLock,
 };
 
 use ai_client::AiClient;
@@ -30,6 +26,11 @@ pub struct AppState {
     pub active_task_id: Arc<Mutex<Option<String>>>,
     pub ai_client: Arc<AiClient>,
     pub sidecar_ready: Arc<AtomicBool>,
+    /// Set by task/workflow commands while capture is paused.  Capture loops
+    /// also check this immediately before emitting/persisting results so a
+    /// stop invalidates work already in progress.
+    pub capture_paused: Arc<AtomicBool>,
+    pub capture_generation: Arc<AtomicU64>,
     pub privacy_filter: Arc<RwLock<PrivacyFilter>>,
     pub capture_settings: Arc<RwLock<CaptureSettings>>,
     pub workflow_mode: Arc<RwLock<WorkflowMode>>,
@@ -115,7 +116,9 @@ pub fn run() {
                 db,
                 active_task_id: Arc::new(Mutex::new(active_task_id)),
                 ai_client: Arc::new(AiClient::new()),
-                sidecar_ready: Arc::new(AtomicBool::new(false)),
+                sidecar_ready: Arc::new(AtomicBool::new(true)),
+                capture_paused: Arc::new(AtomicBool::new(false)),
+                capture_generation: Arc::new(AtomicU64::new(0)),
                 privacy_filter: Arc::new(RwLock::new(privacy_filter)),
                 capture_settings: Arc::new(RwLock::new(capture_settings)),
                 workflow_mode: Arc::new(RwLock::new(workflow_mode)),
@@ -131,7 +134,7 @@ pub fn run() {
 
             capture::window_monitor::start(app.handle().clone(), state.clone());
             capture::clipboard::start(app.handle().clone(), state.clone());
-            start_ai_sidecar(app.handle().clone(), state.clone());
+            let _ = app.emit("sidecar-ready", true);
             rollup::scheduler::start(app.handle().clone(), state.clone());
             app.manage(state);
             Ok(())
@@ -237,87 +240,4 @@ async fn load_capture_configuration(
         workflow_mode,
         selective_capture_apps,
     ))
-}
-
-fn start_ai_sidecar(app: tauri::AppHandle, state: AppState) {
-    let app_for_launch = app.clone();
-    let script = sidecar_script(&app);
-    let _ = spawn_python_sidecar(&script);
-
-    tauri::async_runtime::spawn(async move {
-        for _ in 0..30 {
-            if state.ai_client.is_ready().await {
-                state.sidecar_ready.store(true, Ordering::SeqCst);
-                let _ = app_for_launch.emit("sidecar-ready", true);
-                return;
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-    });
-}
-
-fn sidecar_script(app: &tauri::AppHandle) -> PathBuf {
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let bundled = resource_dir.join("sidecar").join("main.py");
-        if bundled.is_file() {
-            return bundled;
-        }
-
-        let bundled = resource_dir.join("main.py");
-        if bundled.is_file() {
-            return bundled;
-        }
-    }
-
-    dev_sidecar_script()
-}
-
-fn dev_sidecar_script() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(|root| root.join("sidecar").join("main.py"))
-        .unwrap_or_else(|| PathBuf::from("sidecar").join("main.py"))
-}
-
-fn spawn_python_sidecar(script: &Path) -> std::io::Result<std::process::Child> {
-    let sidecar_dir = script.parent().map(Path::to_path_buf);
-    let mut executables = Vec::<PathBuf>::new();
-
-    if let Some(sidecar_dir) = sidecar_dir.as_deref() {
-        let root = sidecar_dir.parent();
-        if let Some(root) = root {
-            let venv_python = if cfg!(windows) {
-                root.join(".venv-sidecar")
-                    .join("Scripts")
-                    .join("python.exe")
-            } else {
-                root.join(".venv-sidecar").join("bin").join("python")
-            };
-            if venv_python.is_file() {
-                executables.push(venv_python);
-            }
-        }
-    }
-
-    if cfg!(windows) {
-        executables.push("py".into());
-        executables.push("python".into());
-    } else {
-        executables.push("python3".into());
-        executables.push("python".into());
-    }
-
-    let mut last_error = std::io::Error::other("no Python executable found");
-    for executable in executables {
-        let mut command = std::process::Command::new(executable);
-        command.arg(script);
-        if let Some(directory) = sidecar_dir.as_deref() {
-            command.current_dir(directory);
-        }
-        match command.spawn() {
-            Ok(child) => return Ok(child),
-            Err(error) => last_error = error,
-        }
-    }
-    Err(last_error)
 }

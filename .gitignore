@@ -147,10 +147,11 @@ src-tauri/target/
 src-tauri/sidecar/
 permissions/
 
-# Python sidecar
-sidecar/venv/
-sidecar/__pycache__/
-sidecar/.pytest_cache/
+# MCP Cloud
+mcp-cloud/venv/
+mcp-cloud/__pycache__/
+mcp-cloud/.pytest_cache/
+mcp-cloud/.env
 
 # IDEs / Editors
 .vscode/

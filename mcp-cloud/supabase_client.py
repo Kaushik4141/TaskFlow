@@ -73,7 +73,7 @@ def get_supabase_credentials() -> Tuple[Optional[str], Optional[str]]:
 
     # Check .env files
     if not url or not key:
-        for env_file in [Path(".env"), Path("sidecar/.env"), Path("../.env")]:
+        for env_file in [Path(".env"), Path("mcp-cloud/.env"), Path("../.env")]:
             if env_file.exists():
                 for line in env_file.read_text(encoding="utf-8").splitlines():
                     line = line.strip()
