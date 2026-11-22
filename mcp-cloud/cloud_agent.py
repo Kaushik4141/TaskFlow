@@ -29,6 +29,15 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+try:
+    from crypto import decrypt_text, decrypt_json
+except ImportError:
+    try:
+        from .crypto import decrypt_text, decrypt_json
+    except Exception:
+        def decrypt_text(t, key=None): return t
+        def decrypt_json(d, key=None): return d
+
 
 def find_credentials() -> tuple[Optional[str], Optional[str]]:
     """Resolve Supabase URL and Key from env or .env files."""
@@ -151,11 +160,14 @@ class CloudMemory:
         for r in rows:
             date_str = (r.get("window_end") or "")[:10]
             proj = r.get("project_slug") or "Inbox"
-            title = r.get("title", "")
-            summary = r.get("summary_md", "")
+            title = decrypt_text(r.get("title", ""))
+            summary = decrypt_text(r.get("summary_md", ""))
 
-            apps = r.get("apps") or []
-            tools_str = ", ".join([f"[[Apps/{a}]]" for a in apps]) if apps else "None"
+            raw_apps = r.get("apps") or []
+            apps = decrypt_json(raw_apps) if isinstance(raw_apps, (list, str)) else raw_apps
+            if not isinstance(apps, list):
+                apps = [apps] if apps else []
+            tools_str = ", ".join([f"[[Apps/{a}]]" for a in apps if isinstance(a, str)]) if apps else "None"
 
             summary_lines.append(f"- **[{date_str}] [[Projects/{proj}]] — {title}**")
             summary_lines.append(f"  - **Summary**: {summary[:250]}...")

@@ -28,6 +28,33 @@ except ImportError:
     SUPABASE_SDK_AVAILABLE = False
     Client = Any  # type: ignore
 
+try:
+    from crypto import (
+        encrypt_text,
+        decrypt_text,
+        encrypt_json,
+        decrypt_json,
+        blind_identifier,
+        get_vault_key,
+    )
+except ImportError:
+    try:
+        from .crypto import (
+            encrypt_text,
+            decrypt_text,
+            encrypt_json,
+            decrypt_json,
+            blind_identifier,
+            get_vault_key,
+        )
+    except Exception:
+        def encrypt_text(t, key=None): return t
+        def decrypt_text(t, key=None): return t
+        def encrypt_json(d, key=None): return d
+        def decrypt_json(d, key=None): return d
+        def blind_identifier(i, key=None): return i
+        def get_vault_key(): return b""
+
 
 def get_default_db_path() -> Path:
     """Resolve default TaskFlow SQLite database path."""
@@ -335,11 +362,11 @@ def sync_all_to_supabase() -> Dict[str, Any]:
 
                 note_item = {
                     "path": rel_path,
-                    "title": file_path.stem,
-                    "content": raw_text,
-                    "metadata": {"type": "markdown_note"},
+                    "title": encrypt_text(file_path.stem),
+                    "content": encrypt_text(raw_text),
+                    "metadata": {"type": "markdown_note", "encrypted": True},
                     "file_hash": current_hash,
-                    "embedding": embedding,
+                    "embedding": None,  # Prevent plaintext embedding inversion in cloud
                 }
                 if user_id:
                     note_item["user_id"] = user_id
@@ -354,9 +381,9 @@ def sync_all_to_supabase() -> Dict[str, Any]:
                 m_text = manifest_file.read_text(encoding="utf-8")
                 manifest_item = {
                     "path": "TaskFlow/manifest.json",
-                    "title": "Graph Topology Manifest",
-                    "content": m_text,
-                    "metadata": {"type": "manifest"},
+                    "title": encrypt_text("Graph Topology Manifest"),
+                    "content": encrypt_text(m_text),
+                    "metadata": {"type": "manifest", "encrypted": True},
                     "file_hash": compute_file_hash(m_text),
                     "embedding": None
                 }
@@ -416,12 +443,12 @@ def sync_all_to_supabase() -> Dict[str, Any]:
                     "project_slug": r["workstream_slug"],
                     "window_start": r["window_start"],
                     "window_end": r["window_end"],
-                    "title": r["title"],
-                    "summary_md": r["summary_md"],
-                    "key_points": parse_json(r.get("key_points")),
-                    "apps": parse_json(r.get("apps")),
-                    "resources": parse_json(r.get("resources")),
-                    "embedding": emb,
+                    "title": encrypt_text(r["title"]),
+                    "summary_md": encrypt_text(r["summary_md"]),
+                    "key_points": encrypt_json(parse_json(r.get("key_points"))),
+                    "apps": encrypt_json(parse_json(r.get("apps"))),
+                    "resources": encrypt_json(parse_json(r.get("resources"))),
+                    "embedding": None,  # Prevent plaintext embedding inversion in cloud
                 }
                 if user_id:
                     r_item["user_id"] = user_id
@@ -447,20 +474,25 @@ def sync_all_to_supabase() -> Dict[str, Any]:
             edge_rows = [dict(r) for r in cur.fetchall()]
             con.close()
 
-            if user_id:
-                for edge in edge_rows:
-                    edge["user_id"] = user_id
+            encrypted_edges = []
+            for edge in edge_rows:
+                e_copy = dict(edge)
+                e_copy["source_entity"] = encrypt_text(e_copy["source_entity"])
+                e_copy["target_entity"] = encrypt_text(e_copy["target_entity"])
+                if user_id:
+                    e_copy["user_id"] = user_id
+                encrypted_edges.append(e_copy)
 
-            if edge_rows:
+            if encrypted_edges:
                 conflict_col = "user_id,source_entity,target_entity,relation_type,time_bucket" if user_id else "source_entity,target_entity,relation_type,time_bucket"
                 _supabase_request(
                     "cloud_graph_edges",
                     method="POST",
-                    data=edge_rows,
+                    data=encrypted_edges,
                     params={"on_conflict": conflict_col},
                     headers_extra={"Prefer": "resolution=merge-duplicates"}
                 )
-                report["graph_edges_uploaded"] = len(edge_rows)
+                report["graph_edges_uploaded"] = len(encrypted_edges)
 
         except Exception as e:
             report["errors"].append(f"sqlite sync: {e}")
@@ -537,11 +569,14 @@ def query_cloud_memory(
         for r in rows:
             date_str = r.get("window_end", "")[:10]
             proj = r.get("project_slug") or "Inbox"
-            title = r.get("title", "")
-            summary = r.get("summary_md", "")
+            title = decrypt_text(r.get("title", ""))
+            summary = decrypt_text(r.get("summary_md", ""))
 
-            apps = r.get("apps") or []
-            tools_str = ", ".join([f"[[Apps/{a}]]" for a in apps]) if apps else "None"
+            raw_apps = r.get("apps") or []
+            apps = decrypt_json(raw_apps) if isinstance(raw_apps, (list, str)) else raw_apps
+            if not isinstance(apps, list):
+                apps = [apps] if apps else []
+            tools_str = ", ".join([f"[[Apps/{a}]]" for a in apps if isinstance(a, str)]) if apps else "None"
 
             summary_lines.append(f"- **[{date_str}] [[Projects/{proj}]] — {title}**")
             summary_lines.append(f"  - **Summary**: {summary[:250]}...")
@@ -574,11 +609,22 @@ def query_cloud_memory(
                 params["summary_md"] = f"ilike.%{query}%"
 
             rows = _supabase_request("cloud_rollups", method="GET", params=params)
+            decrypted_rows = []
+            if isinstance(rows, list):
+                for r in rows:
+                    if isinstance(r, dict):
+                        r_copy = dict(r)
+                        r_copy["title"] = decrypt_text(r.get("title", ""))
+                        r_copy["summary_md"] = decrypt_text(r.get("summary_md", ""))
+                        r_copy["apps"] = decrypt_json(r.get("apps"))
+                        decrypted_rows.append(r_copy)
+                    else:
+                        decrypted_rows.append(r)
             return {
                 "source": "supabase_table_fallback",
-                "count": len(rows),
-                "results": rows,
-                "context_summary": f"Retrieved {len(rows)} cloud rollups via PostgREST fallback."
+                "count": len(decrypted_rows),
+                "results": decrypted_rows,
+                "context_summary": f"Retrieved {len(decrypted_rows)} cloud rollups via PostgREST fallback."
             }
         except Exception as e2:
             return {"error": f"Supabase cloud query failed: {e} | Fallback: {e2}"}
