@@ -124,7 +124,11 @@ pub async fn run_rollup(
             events.len()
         );
         if summary_settings.mode == "basic" {
-            let relevant_events = events.iter().map(commands::scored_from_event).collect();
+            let relevant_events = events
+                .iter()
+                .filter(|e| !(e.category.is_some() && e.is_productive == 0))
+                .map(commands::scored_from_event)
+                .collect();
             state
                 .ai_client
                 .summarize(
@@ -145,7 +149,11 @@ pub async fn run_rollup(
                 })
         } else {
             let relevant_events: Vec<ScoredEvent> = if task.source == "memory" {
-                events.iter().map(commands::scored_from_event).collect()
+                events
+                    .iter()
+                    .filter(|e| !(e.category.is_some() && e.is_productive == 0))
+                    .map(commands::scored_from_event)
+                    .collect()
             } else {
                 let filter_result = state
                     .ai_client
@@ -870,6 +878,9 @@ mod tests {
                 is_sanitized: 1,
                 chunk_index: 0,
                 relevance: 0.0,
+                category: None,
+                is_productive: 1,
+                classification_source: None,
                 timestamp: "2026-07-27T10:00:00+00:00".to_string(),
                 created_at: "2026-07-27T10:00:00+00:00".to_string(),
             }

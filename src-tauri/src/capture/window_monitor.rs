@@ -10,7 +10,11 @@ use chrono::Utc;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::{capture::types::ContentType, database, AppState, CaptureFailure, WorkflowMode};
+use crate::{
+    capture::types::ContentType,
+    classifier::{ClassificationResult, IngestionDecision},
+    commands, database, AppState, CaptureFailure, WorkflowMode,
+};
 
 use super::{
     admission::{DeepCaptureAdmission, DeepCapturePermit, TtlCache},
@@ -18,7 +22,6 @@ use super::{
     cleaner::{clean_captured_content, is_meaningful_content},
     types::CapturedContent,
     url_extractor,
-    work_classifier,
 };
 
 #[cfg(target_os = "windows")]
@@ -136,51 +139,58 @@ pub fn start(app: AppHandle, state: AppState) {
                     continue;
                 }
 
-                // Exclude non-productive activity on dual-use platforms (YouTube, Reddit, Twitter, etc.)
-                // right at the ingestion layer so it never enters the SQLite storage layer.
+                // Stage 1: On-device TaskFlow-TinyNet classification (~0.15ms) across ALL apps/sites.
+                // Confident non-productive activity is dropped before SQLite while keeping a sanitized
+                // entry in the ephemeral RAM-only ring buffer so the user can inspect/override it.
                 let extracted_url =
                     url_extractor::extract_from_title(&snapshot.app_name, &snapshot.window_title);
                 let likely_url = extracted_url.as_ref().and_then(|u| u.likely_url.as_deref());
 
-                if work_classifier::is_dual_use_platform(
-                    &snapshot.app_name,
-                    &snapshot.window_title,
-                    likely_url,
-                ) {
-                    let task_id_opt = active_task_id(&state);
-                    let active_task = task_id_opt.and_then(|tid| {
-                        tauri::async_runtime::block_on(crate::database::tasks::get_task_by_id(
-                            &state.db, &tid,
-                        ))
-                        .ok()
-                    });
-                    let task_title = active_task.as_ref().map(|t| t.title.as_str());
-                    let task_desc = active_task.as_ref().and_then(|t| t.description.as_deref());
-
-                    if !work_classifier::should_capture_activity(
+                let task_id = active_task_id(&state).or_else(|| ensure_daily_capture_task(&state));
+                let stage1_result = if changed {
+                    state.classifier.classify_window(
                         &snapshot.app_name,
                         &snapshot.window_title,
                         likely_url,
-                        task_title,
-                        task_desc,
-                        &[],
-                    ) {
+                        true,
+                    )
+                } else {
+                    state.classifier.classify_window(
+                        &snapshot.app_name,
+                        &snapshot.window_title,
+                        likely_url,
+                        false,
+                    )
+                };
+
+                if matches!(stage1_result.decision, IngestionDecision::DropNonProductive) {
+                    if changed {
                         log::debug!(
-                            "[taskflow:capture] Dropped non-productive activity at ingestion: {} - {}",
+                            "[taskflow:classifier] Stage-1 dropped non-productive ({}, p={:.2}, {}us): {} - {}",
+                            stage1_result.category.as_str(),
+                            stage1_result.productivity_prob,
+                            stage1_result.latency_us,
                             snapshot.app_name,
                             snapshot.window_title
                         );
-                        last_window = Some(snapshot);
-                        thread::sleep(Duration::from_secs(1));
-                        continue;
                     }
+                    last_window = Some(snapshot);
+                    thread::sleep(Duration::from_secs(1));
+                    continue;
                 }
 
-                let task_id = active_task_id(&state).or_else(|| ensure_daily_capture_task(&state));
+                let stage1_provisional =
+                    matches!(stage1_result.decision, IngestionDecision::CaptureProvisional);
                 let mut stored_event_id = None;
                 if changed && capture_window_titles {
-                    stored_event_id =
-                        emit_and_store_title_only(&app, &state, &snapshot, task_id.clone(), generation);
+                    stored_event_id = emit_and_store_title_only(
+                        &app,
+                        &state,
+                        &snapshot,
+                        task_id.clone(),
+                        generation,
+                        &stage1_result,
+                    );
                 }
 
                 if changed {
@@ -223,6 +233,7 @@ pub fn start(app: AppHandle, state: AppState) {
                             task_id.unwrap(),
                             generation,
                             stored_event_id,
+                            stage1_provisional,
                             content_cache.clone(),
                             permit,
                         );
@@ -245,6 +256,7 @@ fn emit_and_store_title_only(
     snapshot: &WindowSnapshot,
     task_id: Option<String>,
     generation: u64,
+    classification: &ClassificationResult,
 ) -> Option<String> {
     let task_id = task_id?;
     if !capture_is_current(state, &task_id, generation) {
@@ -252,12 +264,17 @@ fn emit_and_store_title_only(
     }
     let extracted = url_extractor::extract_from_title(&snapshot.app_name, &snapshot.window_title);
     let url = extracted.and_then(|value| value.likely_url);
+    let semantic_content_type = if classification.category_prob >= 0.45 {
+        classification.category.to_content_type().as_str().to_string()
+    } else {
+        ContentType::WindowTitleOnly.as_str().to_string()
+    };
     let payload = WindowChangedPayload {
         app_name: snapshot.app_name.clone(),
         window_title: snapshot.window_title.clone(),
         url: url.clone(),
         content_preview: None,
-        content_type: ContentType::WindowTitleOnly.as_str().to_string(),
+        content_type: semantic_content_type.clone(),
         timestamp: Utc::now().to_rfc3339(),
         task_id: Some(task_id.clone()),
     };
@@ -270,8 +287,13 @@ fn emit_and_store_title_only(
     let db = state.db.clone();
     let app_name = snapshot.app_name.clone();
     let window_title = snapshot.window_title.clone();
+    let relevance = classification.relevance_score as f64;
+    let category = Some(classification.category.as_str().to_string());
+    let is_productive = classification.is_productive;
+    let class_source = Some(classification.source.clone());
+
     let event = tauri::async_runtime::block_on(async move {
-        database::events::insert_event_with_metadata(
+        database::events::insert_event_classified(
             &db,
             task_id,
             "window_switch".to_string(),
@@ -279,10 +301,14 @@ fn emit_and_store_title_only(
             Some(window_title),
             None,
             url,
-            Some(ContentType::WindowTitleOnly.as_str().to_string()),
+            Some(semantic_content_type),
             Some("title_only".to_string()),
             true,
             0,
+            relevance,
+            category,
+            is_productive,
+            class_source,
         )
         .await
     });
@@ -295,6 +321,7 @@ fn emit_and_store_title_only(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_deep_capture(
     app: AppHandle,
     state: AppState,
@@ -302,6 +329,7 @@ fn spawn_deep_capture(
     task_id: String,
     generation: u64,
     title_event_id: Option<String>,
+    stage1_provisional: bool,
     content_cache: Arc<Mutex<WindowCache>>,
     permit: DeepCapturePermit,
 ) {
@@ -345,6 +373,41 @@ fn spawn_deep_capture(
             .is_some_and(|content| !is_meaningful_content(content))
         {
             captured.text = None;
+        }
+
+        // Stage 2: Re-classify with deep UIA/OCR screen text + 24 structural features
+        let stage2_result = state.classifier.classify_deep(
+            &captured.app_name,
+            &captured.window_title,
+            captured.url.as_deref(),
+            captured.text.as_deref(),
+            true,
+        );
+
+        let deep_rejected = matches!(stage2_result.decision, IngestionDecision::DropNonProductive)
+            && (stage1_provisional || stage2_result.productivity_prob < 0.25);
+
+        if deep_rejected {
+            log::debug!(
+                "[taskflow:classifier] Stage-2 purged non-productive capture ({}, p={:.2}): {} - {}",
+                stage2_result.category.as_str(),
+                stage2_result.productivity_prob,
+                captured.app_name,
+                captured.window_title
+            );
+            let db = state.db.clone();
+            tauri::async_runtime::spawn(async move {
+                let _permit = permit;
+                if let Some(event_id) = title_event_id {
+                    let _ = database::events::delete_event(&db, &event_id).await;
+                }
+            });
+            return;
+        }
+
+        // Upgrade ContentType from generic BrowserContent/GenericContent to semantic neural category
+        if stage2_result.category_prob >= 0.40 && stage2_result.category.is_productive_category() {
+            captured.content_type = stage2_result.category.to_content_type();
         }
 
         let preview = captured
@@ -418,33 +481,32 @@ fn spawn_deep_capture(
                 .unwrap_or_default();
             let content_length = captured.text.as_ref().map(|text| text.len()).unwrap_or(0);
             eprintln!(
-                "[taskflow:capture] Deep capture result: {} chars, url={:?}, method={}",
-                content_length, captured.url, captured.capture_method
-            );
-            log::debug!(
-                "Deep capture result: {} chars, url={:?}, method={}",
+                "[taskflow:capture] Deep capture result: {} chars, url={:?}, method={}, cat={} ({:.2})",
                 content_length,
                 captured.url,
-                captured.capture_method
+                captured.capture_method,
+                stage2_result.category.as_str(),
+                stage2_result.productivity_prob
+            );
+            log::debug!(
+                "Deep capture result: {} chars, url={:?}, method={}, cat={}",
+                content_length,
+                captured.url,
+                captured.capture_method,
+                stage2_result.category.as_str()
             );
             if !capture_is_current(&state, &captured.task_id, generation) {
                 return;
             }
+            let relevance = stage2_result.relevance_score as f64;
+            let category_str = stage2_result.category.as_str().to_string();
+            let is_productive = stage2_result.is_productive;
+            let source_str = stage2_result.source.clone();
+
             if let Some(event_id) = title_event_id {
                 let first_chunk = chunks.first().map(|chunk| chunk.text.clone());
                 let content_to_save = first_chunk.or_else(|| captured.text.clone());
-                eprintln!(
-                    "[taskflow:capture] Saving event with content: {}",
-                    if content_to_save
-                        .as_deref()
-                        .is_some_and(|value| !value.trim().is_empty())
-                    {
-                        "yes"
-                    } else {
-                        "no"
-                    }
-                );
-                let _ = database::events::update_event_content(
+                let _ = database::events::update_event_content_classified(
                     &db,
                     &event_id,
                     content_to_save,
@@ -452,6 +514,10 @@ fn spawn_deep_capture(
                     Some(captured.content_type.as_str().to_string()),
                     Some(captured.capture_method.clone()),
                     true,
+                    Some(relevance),
+                    Some(category_str.clone()),
+                    Some(is_productive),
+                    Some(source_str.clone()),
                 )
                 .await;
 
@@ -460,15 +526,28 @@ fn spawn_deep_capture(
                         return;
                     }
                     let remaining = chunks.into_iter().skip(1).collect::<Vec<_>>();
-                    let _ =
-                        database::events::insert_captured_chunks(&db, captured, remaining).await;
+                    let _ = database::events::insert_captured_chunks_classified(
+                        &db,
+                        captured,
+                        remaining,
+                        relevance,
+                        Some(&category_str),
+                        is_productive,
+                        Some(&source_str),
+                    )
+                    .await;
                 }
             } else {
-                eprintln!(
-                    "[taskflow:capture] Saving event with content: {}",
-                    if content_length > 0 { "yes" } else { "no" }
-                );
-                let _ = database::events::insert_captured_chunks(&db, captured, chunks).await;
+                let _ = database::events::insert_captured_chunks_classified(
+                    &db,
+                    captured,
+                    chunks,
+                    relevance,
+                    Some(&category_str),
+                    is_productive,
+                    Some(&source_str),
+                )
+                .await;
             }
         });
     });
@@ -653,6 +732,12 @@ pub(super) fn ensure_daily_capture_task(state: &AppState) -> Option<String> {
         database::tasks::get_or_create_daily_capture_task(&db).await
     })
     .ok()?;
+    let known_projects = tauri::async_runtime::block_on(commands::load_known_projects(&state.db));
+    state.classifier.refresh_context(
+        Some(task.title.as_str()),
+        task.description.as_deref(),
+        &known_projects,
+    );
     let mut active_task_id = state.active_task_id.lock().ok()?;
     if state.capture_paused.load(std::sync::atomic::Ordering::Acquire)
         || state.capture_generation.load(std::sync::atomic::Ordering::Acquire) != generation

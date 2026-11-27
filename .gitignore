@@ -171,3 +171,8 @@ opencode.json
 .venv/
 .venv-sidecar/
 
+# Offline classifier training environment & intermediate datasets
+training/.venv/
+training/classifier/data/
+training/classifier/cache/
+

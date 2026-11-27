@@ -142,6 +142,7 @@ function EventRow({ event }: { event: Event }) {
   const tooltip = [
     event.windowTitle ? `Title: ${event.windowTitle}` : null,
     event.url ? `URL: ${event.url}` : null,
+    event.category ? `Category: ${event.category.replace('_', ' ')} (rel ${Math.round((event.relevance || 0) * 100)}%)` : null,
     event.content ? `Content: ${event.content.slice(0, 100)}` : null,
     event.captureMethod ? `Capture: ${event.captureMethod}` : null,
   ]
@@ -182,6 +183,11 @@ function EventRow({ event }: { event: Event }) {
               {event.appName ? cleanAppName(event.appName) : labelFor(event.eventType)}
             </p>
             {contentIcon(event.contentType)}
+            {event.category && (
+              <span className="rounded bg-emerald-500/15 px-1.5 py-0.2 text-[9px] font-medium capitalize tracking-wide text-emerald-200">
+                {event.category.replace('_', ' ')}
+              </span>
+            )}
             <span className="rounded bg-white/5 px-1.5 py-0.2 text-[9px] uppercase tracking-wider text-white/40">
               {event.eventType.replace('_', ' ')}
             </span>

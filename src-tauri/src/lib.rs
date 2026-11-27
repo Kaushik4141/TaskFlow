@@ -1,10 +1,9 @@
 mod ai_client;
 mod capture;
+pub mod classifier;
 mod commands;
-// `database` and `wiki` are public so `src/bin/detect_dryrun.rs` can replay real
-// captures through the real extractors. The GUI build can't complete on Windows
-// (LNK1318 PDB limit), so this is the only way to verify detection against live
-// data rather than synthetic test fixtures.
+// `database`, `wiki`, and `classifier` are public so dry-run binaries can replay
+// real captures through the real extractors and on-device neural network.
 pub mod database;
 mod integrations;
 mod rollup;
@@ -17,6 +16,7 @@ use std::sync::{
 
 use ai_client::AiClient;
 use capture::privacy::PrivacyFilter;
+use classifier::{ActivityClassifier, ClassifierHandle};
 use sqlx::SqlitePool;
 use tauri::{Emitter, Manager};
 
@@ -25,6 +25,7 @@ pub struct AppState {
     pub db: SqlitePool,
     pub active_task_id: Arc<Mutex<Option<String>>>,
     pub ai_client: Arc<AiClient>,
+    pub classifier: ClassifierHandle,
     pub sidecar_ready: Arc<AtomicBool>,
     /// Set by task/workflow commands while capture is paused.  Capture loops
     /// also check this immediately before emitting/persisting results so a
@@ -95,27 +96,44 @@ pub fn run() {
             let db = tauri::async_runtime::block_on(database::init_database(&db_path))
                 .map_err(|err| format!("failed to initialize database: {err}"))?;
 
-            let active_task_id =
+            let active_task =
                 tauri::async_runtime::block_on(database::tasks::get_active_task(&db))
-                    .map_err(|err| format!("failed to load active task: {err}"))?
-                    .map(|task| task.id);
+                    .map_err(|err| format!("failed to load active task: {err}"))?;
             let (privacy_filter, capture_settings, workflow_mode, selective_capture_apps) =
                 tauri::async_runtime::block_on(load_capture_configuration(&db))
                     .map_err(|err| format!("failed to load capture settings: {err}"))?;
-            let active_task_id = if workflow_mode.captures_without_manual_task() {
+            let active_task = if workflow_mode.captures_without_manual_task() {
                 tauri::async_runtime::block_on(database::tasks::get_or_create_daily_capture_task(
                     &db,
                 ))
                 .map_err(|err| format!("failed to start daily capture: {err}"))
-                .map(|task| Some(task.id))?
+                .map(Some)?
             } else {
-                active_task_id
+                active_task
             };
+            let active_task_id = active_task.as_ref().map(|t| t.id.clone());
+
+            // Boot on-device TaskFlow-TinyNet classifier + local SQLite personalization
+            let ota_override_path = app_data_dir
+                .join("models")
+                .join("activity_classifier_override.bin");
+            let personalization = tauri::async_runtime::block_on(
+                classifier::personalization::load_personalization(&db),
+            );
+            let classifier = ActivityClassifier::initialize(Some(&ota_override_path), personalization)
+                .map_err(|err| format!("failed to initialize neural classifier: {err}"))?;
+            let known_projects = tauri::async_runtime::block_on(commands::load_known_projects(&db));
+            classifier.refresh_context(
+                active_task.as_ref().map(|t| t.title.as_str()),
+                active_task.as_ref().and_then(|t| t.description.as_deref()),
+                &known_projects,
+            );
 
             let state = AppState {
                 db,
                 active_task_id: Arc::new(Mutex::new(active_task_id)),
                 ai_client: Arc::new(AiClient::new()),
+                classifier,
                 sidecar_ready: Arc::new(AtomicBool::new(true)),
                 capture_paused: Arc::new(AtomicBool::new(false)),
                 capture_generation: Arc::new(AtomicU64::new(0)),
@@ -189,6 +207,10 @@ pub fn run() {
             commands::sync_cloud_now,
             commands::get_google_oauth_url,
             commands::sign_out_cloud,
+            commands::get_classifier_status,
+            commands::classify_activity_preview,
+            commands::get_recent_classifications,
+            commands::submit_classification_feedback,
         ])
         .run(tauri::generate_context!())
         .expect("error while running TaskFlow");

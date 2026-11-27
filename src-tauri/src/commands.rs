@@ -131,6 +131,12 @@ pub async fn start_task(state: State<'_, AppState>, id: String) -> Result<Task, 
     let task = tasks::update_task_status(&state.db, id, "active".to_string())
         .await
         .map_err(|err| err.to_string())?;
+    let known_projects = load_known_projects(&state.db).await;
+    state.classifier.refresh_context(
+        Some(task.title.as_str()),
+        task.description.as_deref(),
+        &known_projects,
+    );
     finish_capture_transition(&state, generation, Some(task.id.clone()))?;
     Ok(task)
 }
@@ -145,6 +151,8 @@ pub async fn stop_task(app: AppHandle, state: State<'_, AppState>, id: String) -
     let task = tasks::end_task(&state.db, id)
         .await
         .map_err(|err| err.to_string())?;
+    let known_projects = load_known_projects(&state.db).await;
+    state.classifier.refresh_context(None, None, &known_projects);
     finish_capture_transition(&state, generation, None)?;
     // Stop = flush: roll up whatever was captured since the last window
     // boundary so the final stretch lands in the workstream timeline now,
@@ -492,6 +500,7 @@ pub async fn update_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
+    let is_projects_key = key == "wiki_known_projects";
     sqlx::query(
         r#"
         INSERT INTO settings (key, value)
@@ -504,6 +513,20 @@ pub async fn update_setting(
     .execute(&state.db)
     .await
     .map_err(|err| err.to_string())?;
+
+    if is_projects_key {
+        let known_projects = load_known_projects(&state.db).await;
+        let active_id = state.active_task_id.lock().ok().and_then(|g| g.clone());
+        let active_task = match active_id {
+            Some(tid) => tasks::get_task_by_id(&state.db, &tid).await.ok(),
+            None => None,
+        };
+        state.classifier.refresh_context(
+            active_task.as_ref().map(|t| t.title.as_str()),
+            active_task.as_ref().and_then(|t| t.description.as_deref()),
+            &known_projects,
+        );
+    }
     Ok(())
 }
 
@@ -1421,6 +1444,15 @@ fn finish_capture_transition_state(
 }
 
 pub(crate) fn scored_from_event(event: &Event) -> ScoredEvent {
+    let score = if event.relevance > 0.05 {
+        event.relevance
+    } else {
+        1.0
+    };
+    let reason = match event.category.as_deref() {
+        Some(cat) => format!("neural:{cat}"),
+        None => "Included for basic local summarization".to_string(),
+    };
     ScoredEvent {
         id: event.id.clone(),
         app_name: event.app_name.clone(),
@@ -1429,10 +1461,96 @@ pub(crate) fn scored_from_event(event: &Event) -> ScoredEvent {
         url: event.url.clone(),
         event_type: event.event_type.clone(),
         timestamp: event.timestamp.clone(),
-        relevance_score: 1.0,
-        reason: "Included for basic local summarization".to_string(),
-        included: true,
+        relevance_score: score,
+        reason,
+        included: !(event.category.is_some() && event.is_productive == 0),
     }
+}
+
+#[tauri::command]
+pub async fn get_classifier_status(
+    state: State<'_, AppState>,
+) -> Result<crate::classifier::ClassifierStatus, String> {
+    Ok(state.classifier.status())
+}
+
+#[tauri::command]
+pub async fn classify_activity_preview(
+    state: State<'_, AppState>,
+    app_name: String,
+    window_title: String,
+    url: Option<String>,
+    content: Option<String>,
+) -> Result<crate::classifier::ClassificationResult, String> {
+    if content.as_deref().is_some_and(|c| !c.trim().is_empty()) {
+        Ok(state.classifier.classify_deep(
+            &app_name,
+            &window_title,
+            url.as_deref(),
+            content.as_deref(),
+            false,
+        ))
+    } else {
+        Ok(state
+            .classifier
+            .classify_window(&app_name, &window_title, url.as_deref(), false))
+    }
+}
+
+#[tauri::command]
+pub async fn get_recent_classifications(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::classifier::RecentClassificationEntry>, String> {
+    Ok(state.classifier.recent_classifications())
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn submit_classification_feedback(
+    state: State<'_, AppState>,
+    event_id: Option<String>,
+    app_name: String,
+    window_title: String,
+    url: Option<String>,
+    content: Option<String>,
+    is_productive: bool,
+    category: String,
+    pin_rule_scope: Option<String>,
+) -> Result<crate::classifier::ClassificationResult, String> {
+    let parsed_cat = crate::classifier::ActivityCategory::from_str_name(&category)
+        .ok_or_else(|| format!("Unknown activity category: {category}"))?;
+
+    let updated = state
+        .classifier
+        .apply_user_feedback(
+            &state.db,
+            &app_name,
+            &window_title,
+            url.as_deref(),
+            content.as_deref(),
+            is_productive,
+            parsed_cat,
+            pin_rule_scope.as_deref(),
+        )
+        .await?;
+
+    if let Some(eid) = event_id {
+        if !eid.trim().is_empty() {
+            let ct = parsed_cat.to_content_type().as_str();
+            let _ = events::update_event_classification(
+                &state.db,
+                &eid,
+                updated.relevance_score as f64,
+                parsed_cat.as_str(),
+                is_productive,
+                Some(ct),
+                "user_feedback",
+            )
+            .await;
+        }
+    }
+
+    Ok(updated)
 }
 
 /// Vault-safe fallback reason. `fallback_summary` embeds its `reason` argument
@@ -2201,6 +2319,9 @@ mod tests {
             is_sanitized: 1,
             chunk_index: 0,
             relevance: 0.0,
+            category: None,
+            is_productive: 1,
+            classification_source: None,
             timestamp: "2026-07-27T10:00:00+00:00".to_string(),
             created_at: "2026-07-27T10:00:00+00:00".to_string(),
         }

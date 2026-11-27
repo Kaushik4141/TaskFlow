@@ -1,0 +1,64 @@
+{
+  "model_version": "taskflow-tinynet-v1",
+  "teacher_backbone": "minishlab/potion-base-8M",
+  "vocab_size": 19968,
+  "hash_buckets": 12288,
+  "embed_dim": 96,
+  "hidden_dim": 128,
+  "num_categories": 16,
+  "categories": [
+    "coding",
+    "terminal",
+    "research",
+    "learning",
+    "writing",
+    "design",
+    "media_production",
+    "planning",
+    "meetings",
+    "communication",
+    "data_finance",
+    "operations",
+    "entertainment",
+    "gaming",
+    "social_feed",
+    "shopping_personal"
+  ],
+  "model_size_bytes": 3713913,
+  "model_size_mb": 3.542,
+  "temp_prod": 0.92,
+  "temp_cat": 0.9,
+  "training_seconds": 112.3,
+  "metrics": {
+    "validation": {
+      "prod_accuracy": 0.9989,
+      "prod_f1": 0.9992,
+      "prod_auroc": 1.0,
+      "prod_ece": 0.0013,
+      "category_accuracy": 0.9771,
+      "category_macro_f1": 0.9773,
+      "relevance_mae": 0.0687,
+      "samples": 5280
+    },
+    "dual_use_adversarial": {
+      "prod_accuracy": 1.0,
+      "prod_f1": 1.0,
+      "prod_auroc": 1.0,
+      "prod_ece": 0.0,
+      "category_accuracy": 1.0,
+      "category_macro_f1": 1.0,
+      "relevance_mae": 0.0358,
+      "samples": 1200
+    },
+    "unseen_zero_overlap_gold": {
+      "prod_accuracy": 0.9337,
+      "prod_f1": 0.9566,
+      "prod_auroc": 0.9927,
+      "prod_ece": 0.0602,
+      "category_accuracy": 0.7691,
+      "category_macro_f1": 0.7686,
+      "relevance_mae": 0.1016,
+      "samples": 996
+    }
+  }
+}

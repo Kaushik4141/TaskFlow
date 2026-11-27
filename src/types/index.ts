@@ -31,8 +31,63 @@ export interface Event {
   isSanitized: number
   chunkIndex: number
   relevance: number
+  category?: string | null
+  isProductive?: number
+  classificationSource?: string | null
   timestamp: string
   createdAt: string
+}
+
+export type ActivityCategory =
+  | 'coding'
+  | 'terminal'
+  | 'research'
+  | 'learning'
+  | 'writing'
+  | 'design'
+  | 'media_production'
+  | 'planning'
+  | 'meetings'
+  | 'communication'
+  | 'data_finance'
+  | 'operations'
+  | 'entertainment'
+  | 'gaming'
+  | 'social_feed'
+  | 'shopping_personal'
+
+export interface ClassificationResult {
+  isProductive: boolean
+  productivityProb: number
+  category: ActivityCategory
+  categoryLabel: string
+  categoryProb: number
+  relevanceScore: number
+  decision: 'capture_productive' | 'capture_provisional' | 'drop_non_productive'
+  source: string
+  latencyUs: number
+}
+
+export interface RecentClassificationEntry {
+  timestamp: string
+  appName: string
+  windowTitle: string
+  url: string | null
+  stage: string
+  result: ClassificationResult
+}
+
+export interface ClassifierStatus {
+  modelVersion: string
+  vocabSize: number
+  hashBuckets: number
+  sha256Short: string
+  usingOtaOverride: boolean
+  totalInferences: number
+  droppedCount: number
+  avgLatencyUs: number
+  adapterUpdates: number
+  userRuleCount: number
 }
 
 export interface Note {

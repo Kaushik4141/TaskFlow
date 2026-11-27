@@ -9,7 +9,15 @@ import { useTaskStore } from '../stores/taskStore'
 import { useToastStore } from '../stores/toastStore'
 import { useProjectCandidates } from '../hooks/useProjectCandidates'
 import { selectionSpring } from '../lib/motion'
-import type { Integration, LintReport, ProjectCandidate, CloudStatus } from '../types'
+import type {
+  Integration,
+  LintReport,
+  ProjectCandidate,
+  CloudStatus,
+  ClassifierStatus,
+  ClassificationResult,
+  RecentClassificationEntry,
+} from '../types'
 
 const providers: Array<{ id: Integration['provider']; label: string; color: string }> = [
   { id: 'jira', label: 'Jira', color: 'text-sky-300' },
@@ -901,6 +909,77 @@ curl -s -X POST "${activeBaseUrl}/mcp" \\
 }
 
 function DeveloperSection({ onBack }: { onBack: () => void }) {
+  const { addToast } = useToastStore()
+  const [status, setStatus] = useState<ClassifierStatus | null>(null)
+  const [recent, setRecent] = useState<RecentClassificationEntry[]>([])
+  const [testApp, setTestApp] = useState('Google Chrome')
+  const [testTitle, setTestTitle] = useState('MIT 6.824 Distributed Systems Lecture 6 - YouTube - Google Chrome')
+  const [testUrl, setTestUrl] = useState('https://www.youtube.com/watch?v=raft6824')
+  const [preview, setPreview] = useState<ClassificationResult | null>(null)
+  const [testing, setTesting] = useState(false)
+
+  const refreshClassifier = async () => {
+    try {
+      const [s, r] = await Promise.all([
+        invoke<ClassifierStatus>('get_classifier_status'),
+        invoke<RecentClassificationEntry[]>('get_recent_classifications'),
+      ])
+      setStatus(s)
+      setRecent(r)
+    } catch (err) {
+      console.error('Failed to query neural classifier:', err)
+    }
+  }
+
+  useEffect(() => {
+    void refreshClassifier()
+  }, [])
+
+  const runPreview = async (e: FormEvent) => {
+    e.preventDefault()
+    setTesting(true)
+    try {
+      const res = await invoke<ClassificationResult>('classify_activity_preview', {
+        appName: testApp.trim(),
+        windowTitle: testTitle.trim(),
+        url: testUrl.trim() || null,
+        content: null,
+      })
+      setPreview(res)
+      void refreshClassifier()
+    } catch (err) {
+      addToast('error', `Classifier preview failed: ${String(err)}`)
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const handleOverride = async (entry: RecentClassificationEntry, makeProductive: boolean) => {
+    try {
+      await invoke<ClassificationResult>('submit_classification_feedback', {
+        eventId: null,
+        appName: entry.appName,
+        windowTitle: entry.windowTitle,
+        url: entry.url,
+        content: null,
+        isProductive: makeProductive,
+        category: makeProductive ? 'research' : 'entertainment',
+        pinRuleScope: entry.url ? 'domain' : 'app',
+      })
+      addToast(
+        'success',
+        makeProductive
+          ? 'Local adapter updated — future captures here will be kept'
+          : 'Local adapter updated — future captures here will be filtered'
+      )
+      void refreshClassifier()
+    } catch (err) {
+      addToast('error', `Failed to update adapter: ${String(err)}`)
+    }
+  }
+
+  const droppedRecent = recent.filter((item) => item.result.decision === 'drop_non_productive')
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
@@ -911,7 +990,7 @@ function DeveloperSection({ onBack }: { onBack: () => void }) {
           <div>
             <h2 className="text-sm font-semibold tracking-tight text-white">Developer Options</h2>
             <p className="text-[11px] text-white/50">
-              Live raw event stream (last 50 events) and window telemetry
+              On-device neural classifier telemetry, live event stream, and personalization
             </p>
           </div>
         </div>
@@ -923,6 +1002,122 @@ function DeveloperSection({ onBack }: { onBack: () => void }) {
           ← Settings
         </button>
       </div>
+
+      {/* On-Device Neural Activity Classifier Panel (text-first, zero charts per PRODUCT.md) */}
+      <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3.5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <BrainIcon className="h-4 w-4 text-emerald-300" />
+            <span className="text-xs font-semibold text-white">
+              On-Device Neural Classifier ({status?.modelVersion ?? 'taskflow-tinynet-v1'})
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refreshClassifier()}
+            className="rounded-lg border border-white/10 px-2 py-0.5 text-[10px] text-white/60 hover:bg-white/5 hover:text-white"
+          >
+            Refresh
+          </button>
+        </div>
+
+        {status && (
+          <div className="flex flex-wrap gap-2 text-[11px] font-mono text-white/60">
+            <span className="rounded-md bg-black/30 px-2 py-1">
+              vocab {status.vocabSize.toLocaleString()} + {status.hashBuckets.toLocaleString()} subword buckets
+            </span>
+            <span className="rounded-md bg-black/30 px-2 py-1">
+              avg {status.avgLatencyUs.toFixed(0)} µs
+            </span>
+            <span className="rounded-md bg-black/30 px-2 py-1">
+              {status.totalInferences} runs · {status.droppedCount} filtered
+            </span>
+            <span className="rounded-md bg-black/30 px-2 py-1">
+              adapter updates: {status.adapterUpdates} · rules: {status.userRuleCount}
+            </span>
+          </div>
+        )}
+
+        <form onSubmit={runPreview} className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <input
+            type="text"
+            value={testApp}
+            onChange={(e) => setTestApp(e.target.value)}
+            placeholder="App name (e.g. Google Chrome)"
+            className="input py-1.5 text-xs"
+          />
+          <input
+            type="text"
+            value={testTitle}
+            onChange={(e) => setTestTitle(e.target.value)}
+            placeholder="Window title"
+            className="input py-1.5 text-xs sm:col-span-2"
+          />
+          <input
+            type="text"
+            value={testUrl}
+            onChange={(e) => setTestUrl(e.target.value)}
+            placeholder="Optional URL"
+            className="input py-1.5 text-xs sm:col-span-2"
+          />
+          <button type="submit" disabled={testing} className="btn-primary py-1.5 text-xs">
+            {testing ? 'Scoring...' : 'Test Classifier'}
+          </button>
+        </form>
+
+        {preview && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-black/30 px-3 py-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                  preview.isProductive
+                    ? 'bg-emerald-500/20 text-emerald-200'
+                    : 'bg-rose-500/20 text-rose-200'
+                }`}
+              >
+                {preview.isProductive ? 'Productive' : 'Non-Productive'} ({Math.round(preview.productivityProb * 100)}%)
+              </span>
+              <span className="font-medium text-white/85">{preview.categoryLabel}</span>
+              <span className="font-mono text-[10px] text-white/45">
+                rel {Math.round(preview.relevanceScore * 100)}% · {preview.latencyUs} µs · {preview.source}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {droppedRecent.length > 0 && (
+          <div className="space-y-1.5 pt-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-white/40">
+              Recently Filtered (RAM-only, never stored in SQLite)
+            </p>
+            <div className="max-h-36 space-y-1 overflow-y-auto">
+              {droppedRecent.slice(0, 8).map((item, idx) => (
+                <div
+                  key={`${item.timestamp}-${idx}`}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-white/[0.04] bg-black/25 px-2.5 py-1.5 text-[11px]"
+                >
+                  <div className="min-w-0">
+                    <span className="font-medium text-white/75">{item.appName}</span>
+                    <span className="mx-1.5 text-white/30">·</span>
+                    <span className="truncate text-white/50">{item.windowTitle}</span>
+                    <span className="ml-2 rounded bg-rose-500/15 px-1.5 py-0.5 text-[9px] text-rose-200">
+                      {item.result.categoryLabel}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleOverride(item, true)}
+                    className="shrink-0 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200 hover:bg-emerald-500/20"
+                  >
+                    Allow for work
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       <EventFeed />
     </div>
   )

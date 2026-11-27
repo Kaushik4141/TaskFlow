@@ -86,9 +86,28 @@ pub async fn run_migrations(db: &SqlitePool) -> Result<(), sqlx::Error> {
     add_column_if_missing(db, "events", "capture_method", "TEXT").await?;
     add_column_if_missing(db, "events", "is_sanitized", "INTEGER DEFAULT 0").await?;
     add_column_if_missing(db, "events", "chunk_index", "INTEGER DEFAULT 0").await?;
+    add_column_if_missing(db, "events", "category", "TEXT").await?;
+    add_column_if_missing(db, "events", "is_productive", "INTEGER DEFAULT 1").await?;
+    add_column_if_missing(db, "events", "classification_source", "TEXT").await?;
 
     add_column_if_missing(db, "documentation", "summary_embedding", "BLOB").await?;
     add_column_if_missing(db, "documentation", "ai_mode", "TEXT").await?;
+
+    // Explicit per-user domain/app pin rules for the on-device neural classifier.
+    db.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS classifier_overrides (
+            id            TEXT PRIMARY KEY,
+            match_kind    TEXT NOT NULL,
+            pattern       TEXT NOT NULL,
+            is_productive INTEGER NOT NULL DEFAULT 1,
+            category      TEXT,
+            updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(match_kind, pattern)
+        );
+        "#,
+    )
+    .await?;
 
     db.execute(
         r#"

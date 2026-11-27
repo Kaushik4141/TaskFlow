@@ -935,6 +935,9 @@ mod tests {
             is_sanitized: 1,
             chunk_index: 0,
             relevance: 1.0,
+            category: None,
+            is_productive: 1,
+            classification_source: None,
             timestamp: "2026-07-10T10:00:00+00:00".to_string(),
             created_at: "2026-07-10T10:00:00+00:00".to_string(),
         }

@@ -1,7 +1,8 @@
-//! Work relevance classifier for dual-use platforms (YouTube, Reddit, Twitter/X, Twitch).
+//! Legacy keyword work relevance classifier for dual-use platforms.
 //!
-//! Differentiates between productive learning/research and non-work leisure/entertainment
-//! at the ingestion gate—BEFORE anything is saved to SQLite or emitted to the application.
+//! Superseded at the ingestion gate by the on-device neural engine (`crate::classifier`),
+//! kept for deterministic fallback reference and regression test coverage.
+#![allow(dead_code)]
 
 use std::collections::BTreeSet;
 

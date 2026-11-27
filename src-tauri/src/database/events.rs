@@ -26,6 +26,12 @@ pub struct Event {
     pub is_sanitized: i64,
     pub chunk_index: i64,
     pub relevance: f64,
+    #[sqlx(default)]
+    pub category: Option<String>,
+    #[sqlx(default)]
+    pub is_productive: i64,
+    #[sqlx(default)]
+    pub classification_source: Option<String>,
     pub timestamp: String,
     pub created_at: String,
 }
@@ -133,6 +139,44 @@ pub async fn insert_event_with_metadata(
     is_sanitized: bool,
     chunk_index: i64,
 ) -> Result<Event, sqlx::Error> {
+    insert_event_classified(
+        db,
+        task_id,
+        event_type,
+        app_name,
+        window_title,
+        content,
+        url,
+        content_type,
+        capture_method,
+        is_sanitized,
+        chunk_index,
+        0.5,
+        None,
+        true,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_event_classified(
+    db: &SqlitePool,
+    task_id: String,
+    event_type: String,
+    app_name: Option<String>,
+    window_title: Option<String>,
+    content: Option<String>,
+    url: Option<String>,
+    content_type: Option<String>,
+    capture_method: Option<String>,
+    is_sanitized: bool,
+    chunk_index: i64,
+    relevance: f64,
+    category: Option<String>,
+    is_productive: bool,
+    classification_source: Option<String>,
+) -> Result<Event, sqlx::Error> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
 
@@ -140,9 +184,10 @@ pub async fn insert_event_with_metadata(
         r#"
         INSERT INTO events
             (id, task_id, event_type, app_name, window_title, content, url, content_type,
-             capture_method, is_sanitized, chunk_index, relevance, timestamp, created_at)
+             capture_method, is_sanitized, chunk_index, relevance, category, is_productive,
+             classification_source, timestamp, created_at)
         VALUES
-            (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0.0, ?12, ?12)
+            (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)
         "#,
     )
     .bind(&id)
@@ -156,6 +201,10 @@ pub async fn insert_event_with_metadata(
     .bind(capture_method)
     .bind(if is_sanitized { 1 } else { 0 })
     .bind(chunk_index)
+    .bind(relevance)
+    .bind(category)
+    .bind(if is_productive { 1 } else { 0 })
+    .bind(classification_source)
     .bind(&now)
     .execute(db)
     .await?;
@@ -167,6 +216,18 @@ pub async fn insert_captured_chunks(
     db: &SqlitePool,
     captured: CapturedContent,
     chunks: Vec<ContentChunk>,
+) -> Result<Vec<Event>, sqlx::Error> {
+    insert_captured_chunks_classified(db, captured, chunks, 0.5, None, true, None).await
+}
+
+pub async fn insert_captured_chunks_classified(
+    db: &SqlitePool,
+    captured: CapturedContent,
+    chunks: Vec<ContentChunk>,
+    relevance: f64,
+    category: Option<&str>,
+    is_productive: bool,
+    classification_source: Option<&str>,
 ) -> Result<Vec<Event>, sqlx::Error> {
     // A capture can produce several chunks. Commit them as one unit so an
     // SQLITE_BUSY/error cannot leave a partial screen capture in the feed.
@@ -195,6 +256,10 @@ pub async fn insert_captured_chunks(
             &content_type,
             &capture_method,
             0,
+            relevance,
+            category,
+            is_productive,
+            classification_source,
         )
         .await?;
         events.push(event);
@@ -210,6 +275,10 @@ pub async fn insert_captured_chunks(
                 &content_type,
                 &capture_method,
                 index as i64,
+                relevance,
+                category,
+                is_productive,
+                classification_source,
             )
             .await?;
             events.push(event);
@@ -231,6 +300,10 @@ async fn insert_captured_chunk_row(
     content_type: &str,
     capture_method: &str,
     chunk_index: i64,
+    relevance: f64,
+    category: Option<&str>,
+    is_productive: bool,
+    classification_source: Option<&str>,
 ) -> Result<Event, sqlx::Error> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
@@ -239,11 +312,12 @@ async fn insert_captured_chunk_row(
         INSERT INTO events
             (id, task_id, event_type, app_name, window_title, content, url,
              content_type, capture_method, is_sanitized, chunk_index, relevance,
-             timestamp, created_at)
-        VALUES (?1, ?2, 'window_switch', ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, 0.0, ?10, ?10)
+             category, is_productive, classification_source, timestamp, created_at)
+        VALUES (?1, ?2, 'window_switch', ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?10, ?11, ?12, ?13, ?14, ?14)
         RETURNING id, task_id, event_type, app_name, window_title, content, url,
                   content_type, capture_method, is_sanitized, chunk_index,
-                  relevance, timestamp, created_at
+                  relevance, category, is_productive, classification_source,
+                  timestamp, created_at
         "#,
     )
     .bind(&id)
@@ -255,11 +329,16 @@ async fn insert_captured_chunk_row(
     .bind(content_type)
     .bind(capture_method)
     .bind(chunk_index)
+    .bind(relevance)
+    .bind(category)
+    .bind(if is_productive { 1 } else { 0 })
+    .bind(classification_source)
     .bind(&now)
     .fetch_one(&mut **transaction)
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn update_event_content(
     db: &SqlitePool,
     id: &str,
@@ -269,6 +348,36 @@ pub async fn update_event_content(
     capture_method: Option<String>,
     is_sanitized: bool,
 ) -> Result<Event, sqlx::Error> {
+    update_event_content_classified(
+        db,
+        id,
+        content,
+        url,
+        content_type,
+        capture_method,
+        is_sanitized,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn update_event_content_classified(
+    db: &SqlitePool,
+    id: &str,
+    content: Option<String>,
+    url: Option<String>,
+    content_type: Option<String>,
+    capture_method: Option<String>,
+    is_sanitized: bool,
+    relevance: Option<f64>,
+    category: Option<String>,
+    is_productive: Option<bool>,
+    classification_source: Option<String>,
+) -> Result<Event, sqlx::Error> {
     sqlx::query(
         r#"
         UPDATE events
@@ -276,7 +385,11 @@ pub async fn update_event_content(
             url = COALESCE(?3, url),
             content_type = COALESCE(?4, content_type),
             capture_method = COALESCE(?5, capture_method),
-            is_sanitized = ?6
+            is_sanitized = ?6,
+            relevance = COALESCE(?7, relevance),
+            category = COALESCE(?8, category),
+            is_productive = COALESCE(?9, is_productive),
+            classification_source = COALESCE(?10, classification_source)
         WHERE id = ?1
         "#,
     )
@@ -286,10 +399,55 @@ pub async fn update_event_content(
     .bind(content_type)
     .bind(capture_method)
     .bind(if is_sanitized { 1 } else { 0 })
+    .bind(relevance)
+    .bind(category)
+    .bind(is_productive.map(|b| if b { 1i64 } else { 0i64 }))
+    .bind(classification_source)
     .execute(db)
     .await?;
 
     get_event_by_id(db, id).await
+}
+
+pub async fn update_event_classification(
+    db: &SqlitePool,
+    id: &str,
+    relevance: f64,
+    category: &str,
+    is_productive: bool,
+    content_type: Option<&str>,
+    source: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        UPDATE events
+        SET relevance = ?2,
+            category = ?3,
+            is_productive = ?4,
+            content_type = COALESCE(?5, content_type),
+            classification_source = ?6
+        WHERE id = ?1
+        "#,
+    )
+    .bind(id)
+    .bind(relevance)
+    .bind(category)
+    .bind(if is_productive { 1i64 } else { 0i64 })
+    .bind(content_type)
+    .bind(source)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Deletes a single event row (used by Stage-2 deep capture to purge provisional
+/// Stage-1 title rows that turn out to be non-productive leisure/social noise).
+pub async fn delete_event(db: &SqlitePool, id: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM events WHERE id = ?1")
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(())
 }
 
 pub async fn get_events_for_task(
@@ -299,7 +457,8 @@ pub async fn get_events_for_task(
     sqlx::query_as::<_, Event>(
         r#"
         SELECT id, task_id, event_type, app_name, window_title, content, url,
-               content_type, capture_method, is_sanitized, chunk_index, relevance, timestamp, created_at
+               content_type, capture_method, is_sanitized, chunk_index, relevance,
+               category, is_productive, classification_source, timestamp, created_at
         FROM events
         WHERE task_id = ?1
         ORDER BY timestamp ASC
@@ -322,7 +481,8 @@ pub async fn get_events_in_window(
     sqlx::query_as::<_, Event>(
         r#"
         SELECT id, task_id, event_type, app_name, window_title, content, url,
-               content_type, capture_method, is_sanitized, chunk_index, relevance, timestamp, created_at
+               content_type, capture_method, is_sanitized, chunk_index, relevance,
+               category, is_productive, classification_source, timestamp, created_at
         FROM events
         WHERE task_id = ?1 AND timestamp > ?2 AND timestamp <= ?3
         ORDER BY timestamp ASC
@@ -381,7 +541,8 @@ pub async fn clear_content_before(db: &SqlitePool, cutoff: &str) -> Result<u64, 
     Ok(result.rows_affected())
 }
 
-pub async fn get_recent_events(    db: &SqlitePool,
+pub async fn get_recent_events(
+    db: &SqlitePool,
     task_id: String,
     limit: i64,
 ) -> Result<Vec<Event>, sqlx::Error> {
@@ -389,7 +550,8 @@ pub async fn get_recent_events(    db: &SqlitePool,
         r#"
         SELECT * FROM (
             SELECT id, task_id, event_type, app_name, window_title, content, url,
-                   content_type, capture_method, is_sanitized, chunk_index, relevance, timestamp, created_at
+                   content_type, capture_method, is_sanitized, chunk_index, relevance,
+                   category, is_productive, classification_source, timestamp, created_at
             FROM events
             WHERE task_id = ?1
             ORDER BY timestamp DESC
@@ -525,13 +687,69 @@ mod tests {
         assert_eq!(aggregate.with_url, 0);
         assert_eq!(aggregate.title_only, 0);
     }
+
+    #[tokio::test]
+    async fn classified_event_lifecycle_and_provisional_purge() {
+        let db = memory_db().await;
+        let ev = super::insert_event_classified(
+            &db,
+            "stats-task".to_string(),
+            "window_switch".to_string(),
+            Some("Google Chrome".to_string()),
+            Some("MIT 6.824 Lecture - YouTube".to_string()),
+            None,
+            Some("https://www.youtube.com/watch?v=raft".to_string()),
+            Some("LearningContent".to_string()),
+            Some("title_only".to_string()),
+            true,
+            0,
+            0.88,
+            Some("learning".to_string()),
+            true,
+            Some("neural_title".to_string()),
+        )
+        .await
+        .expect("insert classified event");
+
+        assert_eq!(ev.category.as_deref(), Some("learning"));
+        assert_eq!(ev.is_productive, 1);
+        assert!((ev.relevance - 0.88).abs() < 1e-6);
+        assert_eq!(ev.classification_source.as_deref(), Some("neural_title"));
+
+        let updated = super::update_event_content_classified(
+            &db,
+            &ev.id,
+            Some("Lesson 6: Raft consensus".to_string()),
+            None,
+            Some("LearningContent".to_string()),
+            Some("uia".to_string()),
+            true,
+            Some(0.94),
+            Some("learning".to_string()),
+            Some(true),
+            Some("neural_deep".to_string()),
+        )
+        .await
+        .expect("stage 2 deep update");
+        assert!((updated.relevance - 0.94).abs() < 1e-6);
+        assert_eq!(updated.classification_source.as_deref(), Some("neural_deep"));
+
+        super::delete_event(&db, &ev.id)
+            .await
+            .expect("purge provisional event");
+        let remaining = super::get_events_for_task(&db, "stats-task".to_string())
+            .await
+            .expect("fetch remaining");
+        assert!(remaining.is_empty());
+    }
 }
 
 async fn get_event_by_id(db: &SqlitePool, id: &str) -> Result<Event, sqlx::Error> {
     sqlx::query_as::<_, Event>(
         r#"
         SELECT id, task_id, event_type, app_name, window_title, content, url,
-               content_type, capture_method, is_sanitized, chunk_index, relevance, timestamp, created_at
+               content_type, capture_method, is_sanitized, chunk_index, relevance,
+               category, is_productive, classification_source, timestamp, created_at
         FROM events
         WHERE id = ?1
         "#,

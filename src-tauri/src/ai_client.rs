@@ -23,6 +23,12 @@ pub struct EventPayload {
     pub capture_method: Option<String>,
     pub event_type: String,
     pub timestamp: String,
+    #[serde(default)]
+    pub relevance: f64,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub is_productive: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -338,7 +344,13 @@ impl AiClient {
             let is_high_trust = HIGH_TRUST_APPS.iter().any(|app| app_lower.contains(app));
             let is_med_trust = MEDIUM_TRUST_APPS.iter().any(|app| app_lower.contains(app));
 
-            let (score, reason, included) = if keyword_hits >= 2 {
+            let (score, reason, included) = if event.category.is_some() && event.is_productive == 0 {
+                (0.05, "neural_non_productive".to_string(), false)
+            } else if event.relevance > 0.05 && event.category.is_some() {
+                let boosted = (event.relevance + (keyword_hits.min(2) as f64) * 0.08).min(0.99);
+                let cat = event.category.as_deref().unwrap_or("work");
+                (boosted, format!("neural:{cat}"), boosted >= 0.35)
+            } else if keyword_hits >= 2 {
                 (0.85, format!("keyword_match:{keyword_hits}"), true)
             } else if keyword_hits == 1 {
                 (0.70, "keyword_match:1".to_string(), true)
@@ -839,6 +851,9 @@ impl From<Event> for EventPayload {
             capture_method: event.capture_method,
             event_type: event.event_type,
             timestamp: event.timestamp,
+            relevance: event.relevance,
+            category: event.category,
+            is_productive: event.is_productive,
         }
     }
 }

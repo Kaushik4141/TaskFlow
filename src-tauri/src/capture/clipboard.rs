@@ -90,9 +90,24 @@ pub fn start(app: AppHandle, state: AppState) {
                             } else {
                                 None
                             };
+                            let classified = state.classifier.classify_deep(
+                                "Clipboard",
+                                url.as_deref().unwrap_or("Clipboard Snippet"),
+                                url.as_deref(),
+                                Some(&content),
+                                false,
+                            );
+                            if !classified.is_productive && classified.productivity_prob < 0.25 {
+                                thread::sleep(Duration::from_millis(500));
+                                continue;
+                            }
+                            let relevance = classified.relevance_score as f64;
+                            let category = Some(classified.category.as_str().to_string());
+                            let is_productive = classified.is_productive;
+                            let class_source = Some(classified.source);
 
                             tauri::async_runtime::spawn(async move {
-                                let _ = database::events::insert_event_with_metadata(
+                                let _ = database::events::insert_event_classified(
                                     &db,
                                     task_id,
                                     if url.is_some() { "url" } else { "clipboard" }.to_string(),
@@ -104,6 +119,10 @@ pub fn start(app: AppHandle, state: AppState) {
                                     Some("clipboard".to_string()),
                                     true,
                                     0,
+                                    relevance,
+                                    category,
+                                    is_productive,
+                                    class_source,
                                 )
                                 .await;
                             });

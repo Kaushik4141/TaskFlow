@@ -41,14 +41,22 @@ pub fn hub_slug_for_app(name: &str) -> Option<String> {
 /// activity-hub slug. Returns None for unknown / generic-noise types.
 pub fn activity_slug_for(content_type: &str) -> Option<String> {
     let slug = match content_type {
-        "CodeContent" => "Code",
+        "CodeContent" | "coding" => "Code",
         "BrowserContent" => "Browser",
-        "TerminalContent" => "Terminal",
-        "DocumentationContent" | "DocsContent" => "Documentation",
-        "ChatContent" | "MessagingContent" => "Communication",
+        "TerminalContent" | "terminal" => "Terminal",
+        "ResearchContent" | "research" => "Research",
+        "LearningContent" | "learning" => "Learning",
+        "DocumentationContent" | "DocsContent" | "writing" => "Documentation",
+        "ChatContent" | "MessagingContent" | "CommunicationContent" | "communication" => {
+            "Communication"
+        }
+        "MeetingsContent" | "meetings" => "Meetings",
         "EmailContent" => "Email",
-        "DesignContent" => "Design",
-        "SpreadsheetContent" => "Spreadsheet",
+        "DesignContent" | "design" => "Design",
+        "MediaProductionContent" | "media_production" => "MediaProduction",
+        "PlanningContent" | "planning" => "Planning",
+        "SpreadsheetContent" | "data_finance" => "Spreadsheet",
+        "OperationsContent" | "operations" => "Operations",
         "GenericContent" => "General",
         "ClipboardContent" => "Clipboard",
         "WindowTitleOnly" => "WindowSwitch",
@@ -60,8 +68,22 @@ pub fn activity_slug_for(content_type: &str) -> Option<String> {
                 "Browser"
             } else if lower.contains("terminal") {
                 "Terminal"
+            } else if lower.contains("learn") {
+                "Learning"
+            } else if lower.contains("research") {
+                "Research"
             } else if lower.contains("doc") {
                 "Documentation"
+            } else if lower.contains("design") {
+                "Design"
+            } else if lower.contains("meeting") {
+                "Meetings"
+            } else if lower.contains("plan") {
+                "Planning"
+            } else if lower.contains("media") {
+                "MediaProduction"
+            } else if lower.contains("oper") {
+                "Operations"
             } else {
                 return None;
             }
@@ -903,6 +925,9 @@ mod tests {
             is_sanitized: 1,
             chunk_index: 0,
             relevance: 0.0,
+            category: None,
+            is_productive: 1,
+            classification_source: None,
             timestamp: "2026-07-27T10:00:00+00:00".to_string(),
             created_at: "2026-07-27T10:00:00+00:00".to_string(),
         }
